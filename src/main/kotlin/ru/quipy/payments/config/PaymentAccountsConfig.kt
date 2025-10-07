@@ -63,7 +63,7 @@ class PaymentAccountsConfig {
                     paymentService,
                     paymentProviderHostPort,
                     token,
-                    meterRegistry //////////
+                    meterRegistry
                 )
             }
     }
