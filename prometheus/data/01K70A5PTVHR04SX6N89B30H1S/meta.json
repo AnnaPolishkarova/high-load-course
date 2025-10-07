@@ -1,0 +1,17 @@
+{
+	"ulid": "01K70A5PTVHR04SX6N89B30H1S",
+	"minTime": 1759435200000,
+	"maxTime": 1759442400000,
+	"stats": {
+		"numSamples": 465120,
+		"numSeries": 646,
+		"numChunks": 3876
+	},
+	"compaction": {
+		"level": 1,
+		"sources": [
+			"01K70A5PTVHR04SX6N89B30H1S"
+		]
+	},
+	"version": 1
+}
