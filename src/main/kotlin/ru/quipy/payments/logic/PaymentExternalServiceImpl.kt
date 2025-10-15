@@ -88,13 +88,15 @@ class PaymentExternalSystemAdapterImpl(
 
         try {
             ongoingWindow.acquire()
-            slidingWindowRateLimiter.tickBlocking()
+            slidingWindowRateLimiter.tickBlocking() ///////////////
+
             val request = Request.Builder().run {
                 url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
                 post(emptyBody)
             }.build()
 
             client.newCall(request).execute().use { response ->
+
                 val body = try {
                     mapper.readValue(response.body?.string(), ExternalSysResponse::class.java)
                 } catch (e: Exception) {

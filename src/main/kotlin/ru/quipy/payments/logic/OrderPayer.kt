@@ -1,13 +1,19 @@
 package ru.quipy.payments.logic
 
+//import io.prometheus.metrics.core.metrics.Gauge
+import io.micrometer.core.instrument.Gauge
+import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import ru.quipy.common.utils.CallerBlockingRejectedExecutionHandler
 import ru.quipy.common.utils.NamedThreadFactory
+import ru.quipy.common.utils.OngoingWindow
+import ru.quipy.common.utils.SlidingWindowRateLimiter
 import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
+import java.time.Duration
 import java.util.*
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
@@ -26,19 +32,39 @@ class OrderPayer {
     @Autowired
     private lateinit var paymentService: PaymentService
 
+    @Autowired
+    private lateinit var meterRegistry: MeterRegistry
+
     private val paymentExecutor = ThreadPoolExecutor(
         16,
         16,
+//        64,
+//        64,
         0L,
         TimeUnit.MILLISECONDS,
-        LinkedBlockingQueue(8_000),
+//        LinkedBlockingQueue(8_000),
+        LinkedBlockingQueue(64_000),
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
     )
+    private val slidingWindowRateLimiter = SlidingWindowRateLimiter( /////////////
+        rate = 400,
+        window = Duration.ofSeconds(25))
 
-    fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long {
+    fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long? {
+
+
+        if (!slidingWindowRateLimiter.tick()) {
+//            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).header("Retry-After", timestamp.toString()).build();
+            return null
+        }
+
         val createdAt = System.currentTimeMillis()
+
+
         paymentExecutor.submit {
+
+
             val createdEvent = paymentESService.create {
                 it.create(
                     paymentId,

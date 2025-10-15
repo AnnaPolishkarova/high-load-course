@@ -2,16 +2,23 @@ package ru.quipy.apigateway
 
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
+import org.springframework.http.HttpStatus
+//import org.eclipse.jetty.http.HttpStatus
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
+import ru.quipy.common.utils.SlidingWindowRateLimiter
 import ru.quipy.orders.repository.OrderRepository
 import ru.quipy.payments.logic.OrderPayer
+import ru.quipy.payments.logic.PaymentAccountProperties
+import java.time.Duration
 import java.util.*
 
 @RestController
-class APIController (private val meterRegistry: MeterRegistry) {
+class APIController (
+    private val meterRegistry: MeterRegistry) {
 
     val logger: Logger = LoggerFactory.getLogger(APIController::class.java)
 
@@ -61,7 +68,7 @@ class APIController (private val meterRegistry: MeterRegistry) {
     }
 
     @PostMapping("/orders/{orderId}/payment")
-    fun payOrder(@PathVariable orderId: UUID, @RequestParam deadline: Long): PaymentSubmissionDto {
+    fun payOrder(@PathVariable orderId: UUID, @RequestParam deadline: Long): ResponseEntity<PaymentSubmissionDto> {////////
 
         paymentRequestTotal.increment()
 
@@ -73,7 +80,13 @@ class APIController (private val meterRegistry: MeterRegistry) {
 
 
         val createdAt = orderPayer.processPayment(orderId, order.price, paymentId, deadline)
-        return PaymentSubmissionDto(createdAt, paymentId)
+        val timestamp = System.currentTimeMillis() + 1000  /////////////
+        if (createdAt == null) {  ///////////
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", timestamp.toString()).build();
+        }
+//        return PaymentSubmissionDto(createdAt, paymentId)
+        return ResponseEntity.ok(PaymentSubmissionDto(createdAt, paymentId)) /////////
     }
 
     class PaymentSubmissionDto(

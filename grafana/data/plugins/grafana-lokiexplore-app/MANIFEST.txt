@@ -7,8 +7,8 @@ Hash: SHA512
   "signedByOrg": "grafana",
   "signedByOrgName": "Grafana Labs",
   "plugin": "grafana-lokiexplore-app",
-  "version": "1.0.28",
-  "time": 1759255578897,
+  "version": "1.0.29",
+  "time": 1759936156814,
   "keyId": "7e4d0c6a708866e7",
   "files": {
     "0b7992cbbccaaaabfb4e.svg": "bf87c01956c61cf71f30881cc7d9f0aef1d45b5fe9f46250409db3b248081064",
@@ -30,7 +30,7 @@ Hash: SHA512
     "3d7fda5219d0a128c3a7.svg": "bad7cd85f6bf3dd685d256a4d056170c77dcb94f21d190c021a2e132b127140e",
     "bd5bafea986ef624f050.svg": "97e29d737706cb3b649fa26ea6680399e0bc8cd5f9c527e625ccbc679cfb96e9",
     "087755a1246f96c42579.svg": "dc742e97421b62a736bb215cd992c84a47d3a922d1f6495c1dde6c53e8380550",
-    "CHANGELOG.md": "bfd23a5a54e6ee35f5aab5922d286a931c63a48063934c913f89834cde7427af",
+    "CHANGELOG.md": "d0e3b3913c9d9be6a8c7635d9dc9ad462fb2613294d979bd190ba0280ee86470",
     "7.js": "646e60fa71436109e99c75ac155e24089e92d0be791c4891116f38dfd7055b54",
     "944.js.map": "6ff62811740048eb5953e8dbd162a0c7dfeba5a1a60af178651014b17d4cf006",
     "2168a10beed690100fcb.svg": "07d87e561a4cbea3a8acc330e58d0f30c903259f20dc67dce10d82013084437b",
@@ -41,7 +41,7 @@ Hash: SHA512
     "82.js": "599e6538e3826e55d903a883ef2320b6c0f6bdec42d946d87c86f2174bc1bb89",
     "85b746ba2cec564b9a89.svg": "92df786da8af0480f71940eba2e1a29d769099f488e10a5bce673b14c8970b6f",
     "26a78975976a604ba774.svg": "23b97366b6cd54063bcdfc124747c04cf0efd218d87e5fdecdbf4c2fb25c3fec",
-    "plugin.json": "0d45bc68b3582b8bc5a17ad2adcd3b199590cc234d6694e725f98cf1eb31de8b",
+    "plugin.json": "f10fadb96a02bb3fe96810e8d67ebf67566231bfb2c4d225f9a567cddd130d1e",
     "206.js.map": "0e7f553ef5edd01c435a2e3db977e60eba4e86d43f32cb2f4711e250349ad175",
     "582.js": "b048c3ef8e895b616991d7640f11c3fa8aa36a4df0a22f9dc0f40ca5886b646a",
     "7.js.map": "7633d23dd5ad53bed65aaf66a18eb7047b6061c7d26ad21792751d005cc1fd94",
@@ -58,7 +58,7 @@ Hash: SHA512
     "644.js.map": "ec143697d1377853966783f7a449afd0a91a2631c0df57c2b7020ddd1ecf53dc",
     "279.js": "290fd62d459660de3d2694b0ca88da3f34bf411be39191123c1b1bb391c9336c",
     "677.js.map": "44ccad7f5d5bbda880bdc4da9adc709b86a504b705c04e00ff4e12e854fa0d22",
-    "328.js": "382f2054df05b7681f807071ce703c459f03c7fc935da82327a9df858fbdb807",
+    "328.js": "e572df4f9035ea045c2691e9d917e166101fba6586cbae3573dfd458b75b0d5b",
     "220.js": "2984fa6c54b4702eb86dccbf06524ee2eb92a93910641490a7356fdfe0bb1cf1",
     "353.js": "76af3737ebe6ec61cb16badfd9b32101ded9a8bff496240686e9acd8aa7681be",
     "826.js": "9bf4b54f486d04f777caf829ac2f543e3b6957a86a41642908076ded1e5d30d3",
@@ -99,7 +99,7 @@ Hash: SHA512
     "7c69e09a44ae38215563.svg": "cf9b05eadc398479afc1a5147b0250c27a15a1601e058fd842a038ee9c0711f2",
     "470.js.LICENSE.txt": "e25e5f78cf2b2fbbf8d4865193c9642bea9f75a1ba1323a8476a534310b26d58",
     "697.js": "76365c97c8d9ccdcdde8f4f20af431902675972dd19a14d6ca284596d59671de",
-    "module.js": "f29e9d47694e41e15452d23b6a349053b0957d550c8e8368d99dd215b1b74c82",
+    "module.js": "1d49e11662c1e2a256d7346595c3f666c5eb458794d0272b75c061536b899f49",
     "2.js.map": "7d108831a50d4da2df296430bc622fd89d2a24a226e590e8e0d6be1412c6d23f",
     "220.js.map": "23350803fef93eccb7bebfbd0f64a45b4db84f0b1657afaef58a96df5443945c",
     "327.js": "0c8c3f353cb2f5b91f0ba55e93b197ef93d702483e500689d6fd71037025d799",
@@ -128,7 +128,7 @@ Hash: SHA512
     "279.js.LICENSE.txt": "9e0cb6b0d82ee46be39b054a3f76419242945d9dbfced78bca42fd65c082e71a",
     "279.js.map": "b3a2973c2284d328db91f4f9ffffeac4597e33e20d6d5af2f669383a85b822fb",
     "677.js": "88e3be46f2f82f79c81f1b49e5bc4e21a8316a0c8991fc7188cb62c9c355aedc",
-    "328.js.map": "2211bcf28ed0a8656d27a6f409e2355219bfb3f770f7f7e9c63671bc1c8e2721",
+    "328.js.map": "3209d073cbb8875de26389ec8af81c34c4ceb8dc097200376fc6505a26cdd4c1",
     "854.js": "378617e0f39387663bf6cf6cc775ad9db9cd86b1daf64cea88d967cfb1dc79c9",
     "2.js": "996dc0b0c82dd07ec61f637fa3879bb851bcf07892f064e1b9e0d706de1805c3",
     "README.md": "860a469ddc8cb370958c5d2bb044d258fcf383e72bee36d933e72d2e727e720b",
@@ -139,7 +139,7 @@ Hash: SHA512
     "353.js.map": "28e98a325665a8a1f5b43c88bf414dd0c339e485cf23cf221a7a1bb48274631b",
     "876.js": "f41345a1bcce59c0044c912b54646f83f23d8db5ae61f5380d166f2167830aab",
     "919.js": "4071ce95027d0ca7989fcbfe8fd111297a5dd552b66b54b76d332ea4062a3ddf",
-    "module.js.map": "09ad2bef6c3d5bfc2921e928d997588f5c7bc1cfb0bdf03feebd58fd3bbf008a",
+    "module.js.map": "bfbb7abefd5af1f365707c2527b3719d822b6dcd0411fd70da7fbec11c922530",
     "727.js": "a8d00859bf85cc6fd3624e84e5532ee8ca4abf1212a88187d7bf66ec72ed5fad",
     "f6f180a5b21afe1799fd.svg": "7b0a77863d61141d158faf714f9c3ca441256ab04dfa916ece12ed66034ed991",
     "660.js": "5d010c9d47640767997b586389385ff39d437a60cae1391942f191e7bab95011",
@@ -148,11 +148,11 @@ Hash: SHA512
 }
 -----BEGIN PGP SIGNATURE-----
 
-wsA+BAETCgBtBYJo3BwbCZB+TQxqcIhm50UUAAAAAAAcACBzYWx0QG5vdGF0
-aW9ucy5vcGVucGdwanMub3JnWrwopJ0FPq+8VJWZugb1qxJO0Sv4ARq4VCFt
-y1jltlAWIQTzOyW2kQdOhGNlcPN+TQxqcIhm5wAAAbECCIaxQiK3d55LQ+hT
-nK3DxJbTsCBdsQz9l7tHpDG8dyTz7F8SkmfDE5SX/Xp645j+PzIpSJJPPbaA
-+1dieBHFelqwAgkBaOK2kBeLUVadSSlQ8HrDVZ1G/F+prMkqhlzztGB2Uh9m
-R1d7gdCAw+14GrlMNNi4rXZa74yVDEKKJnzaxTQSE0o=
-=h4Gq
+wsA+BAETCgBtBYJo5n6dCZB+TQxqcIhm50UUAAAAAAAcACBzYWx0QG5vdGF0
+aW9ucy5vcGVucGdwanMub3Jn2QvKt90Nxt5whwpqNj5EPH7xlbx6DY9F8D9E
+cSoUwkMWIQTzOyW2kQdOhGNlcPN+TQxqcIhm5wAAqwQCCQHcRyfLNICD+ztK
+MeSue0lutb7wCR9cxIVQjshLJgPRRcFk4Y2oN2qAPFPow3zdwpq/CLMNETFX
++F2DaOmoPyqEPQII7ew8PPHr3n3pWHStM984LsmF2WL4XAHAD4B9dNLuBivS
+EDqojk+qKGMikG26qUz9Zb0q+4JN5EJ3bUp/BTLXLIY=
+=T2Ap
 -----END PGP SIGNATURE-----
