@@ -38,24 +38,21 @@ class OrderPayer {
     private val paymentExecutor = ThreadPoolExecutor(
         16,
         16,
-//        64,
-//        64,
         0L,
         TimeUnit.MILLISECONDS,
-//        LinkedBlockingQueue(8_000),
         LinkedBlockingQueue(64_000),
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
     )
+
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter( /////////////
-        rate = 400,
-        window = Duration.ofSeconds(25))
+        rate = 11,
+        window = Duration.ofSeconds(1))
 
     fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long? {
 
 
         if (!slidingWindowRateLimiter.tick()) {
-//            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).header("Retry-After", timestamp.toString()).build();
             return null
         }
 
