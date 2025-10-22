@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import ru.quipy.common.utils.CallerBlockingRejectedExecutionHandler
+import ru.quipy.common.utils.CompositeRateLimiter
+import ru.quipy.common.utils.LeakingBucketRateLimiter
 import ru.quipy.common.utils.NamedThreadFactory
 import ru.quipy.common.utils.OngoingWindow
 import ru.quipy.common.utils.SlidingWindowRateLimiter
@@ -44,15 +46,26 @@ class OrderPayer {
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
     )
-
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter( /////////////
         rate = 11,
         window = Duration.ofSeconds(1))
 
+    private val bucketQueue = LeakingBucketRateLimiter(rate = 3, window = Duration.ofSeconds(1), bucketSize = 90 * 3)
+
+    private val compositeRateLimiter = CompositeRateLimiter(slidingWindowRateLimiter, bucketQueue)
+
     fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long? {
 
 
-        if (!slidingWindowRateLimiter.tick()) {
+//        if (!slidingWindowRateLimiter.tick()) { /////////////
+//            return null
+//        }
+//
+//        if (!bucketQueue.tick()) { /////////////
+//            return null
+//        }
+
+        if (!compositeRateLimiter.tick()) { /////////////
             return null
         }
 
@@ -71,7 +84,7 @@ class OrderPayer {
             }
             logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
 
-            paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
+            paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline) ////////////
         }
         return createdAt
     }

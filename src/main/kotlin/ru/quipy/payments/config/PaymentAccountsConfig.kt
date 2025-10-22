@@ -26,7 +26,7 @@ class PaymentAccountsConfig {
     }
 
     @Autowired
-    private lateinit var meterRegistry: MeterRegistry /////////
+    private lateinit var meterRegistry: MeterRegistry
 
     @Value("\${payment.hostPort}")
     lateinit var paymentProviderHostPort: String
