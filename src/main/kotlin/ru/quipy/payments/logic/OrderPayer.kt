@@ -46,26 +46,13 @@ class OrderPayer {
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
     )
-    private val slidingWindowRateLimiter = SlidingWindowRateLimiter( /////////////
-        rate = 11,
-        window = Duration.ofSeconds(1))
 
-    private val bucketQueue = LeakingBucketRateLimiter(rate = 3, window = Duration.ofSeconds(1), bucketSize = 90 * 3)
+    private val bucketQueue = LeakingBucketRateLimiter(rate = 11, window = Duration.ofSeconds(1), bucketSize = 286)
 
-    private val compositeRateLimiter = CompositeRateLimiter(slidingWindowRateLimiter, bucketQueue)
 
     fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long? {
 
-
-//        if (!slidingWindowRateLimiter.tick()) { /////////////
-//            return null
-//        }
-//
-//        if (!bucketQueue.tick()) { /////////////
-//            return null
-//        }
-
-        if (!compositeRateLimiter.tick()) { /////////////
+        if (!bucketQueue.tick()) { /////////////
             return null
         }
 
