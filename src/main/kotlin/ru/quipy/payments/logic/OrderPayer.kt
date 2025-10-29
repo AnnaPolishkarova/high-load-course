@@ -47,20 +47,19 @@ class OrderPayer {
         CallerBlockingRejectedExecutionHandler()
     )
 
-    private val bucketQueue = LeakingBucketRateLimiter(rate = 11, window = Duration.ofSeconds(1), bucketSize = 286)
+    private val bucketQueue = LeakingBucketRateLimiter(rate = 10, window = Duration.ofSeconds(1), bucketSize = 10)
 
 
     fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long? {
 
-        if (!bucketQueue.tick()) { /////////////
+        val createdAt = System.currentTimeMillis()
+        var result = false
+
+        if (!bucketQueue.tick()) {
             return null
         }
 
-        val createdAt = System.currentTimeMillis()
-
-
         paymentExecutor.submit {
-
 
             val createdEvent = paymentESService.create {
                 it.create(
@@ -71,7 +70,11 @@ class OrderPayer {
             }
             logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
 
-            paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline) ////////////
+            while (!result){
+                result = paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
+            }
+
+
         }
         return createdAt
     }

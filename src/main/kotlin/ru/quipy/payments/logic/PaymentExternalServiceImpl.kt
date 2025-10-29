@@ -71,7 +71,7 @@ class PaymentExternalSystemAdapterImpl(
             .register(meterRegistry)
 
 
-    override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
+    override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): Boolean {
         logger.warn("[$accountName] Submitting payment request for payment $paymentId")
 
         val transactionId = UUID.randomUUID()
@@ -88,13 +88,14 @@ class PaymentExternalSystemAdapterImpl(
 
         try {
             ongoingWindow.acquire()
-            slidingWindowRateLimiter.tickBlocking() ///////////////
+            slidingWindowRateLimiter.tickBlocking()
 
             val request = Request.Builder().run {
                 url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
                 post(emptyBody)
             }.build()
 
+            var result = false
             client.newCall(request).execute().use { response ->
 
                 val body = try {
@@ -102,14 +103,15 @@ class PaymentExternalSystemAdapterImpl(
                 } catch (e: Exception) {
                     paymentFailureTotal.increment()
                     logger.error("[$accountName] [ERROR] Payment processed for txId: $transactionId, payment: $paymentId, result code: ${response.code}, reason: ${response.body?.string()}")
-                    ExternalSysResponse(transactionId.toString(), paymentId.toString(),false, e.message)
+                    ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
                 }
 
                 logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
 
-                if (body.result){
+                if (body.result) {
+                    result = true
                     paymentSuccessTotal.increment()
-                } else{
+                } else {
                     paymentFailureTotal.increment()
                 }
 
@@ -119,6 +121,7 @@ class PaymentExternalSystemAdapterImpl(
                     it.logProcessing(body.result, now(), transactionId, reason = body.message)
                 }
             }
+            return result
         } catch (e: Exception) {
             paymentFailureTotal.increment()
             when (e) {
@@ -142,6 +145,7 @@ class PaymentExternalSystemAdapterImpl(
             ongoingWindow.release()
             paymentCompletedTotal.increment()
         }
+        return true
     }
 
     override fun price() = properties.price
