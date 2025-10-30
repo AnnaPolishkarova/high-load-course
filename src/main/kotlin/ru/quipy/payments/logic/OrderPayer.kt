@@ -70,7 +70,7 @@ class OrderPayer {
             }
             logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
 
-            while (!result){
+            while (!result && System.currentTimeMillis() < deadline){
                 result = paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
             }
 
