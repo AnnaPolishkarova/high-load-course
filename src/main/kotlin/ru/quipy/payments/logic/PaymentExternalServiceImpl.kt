@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
+import io.prometheus.metrics.core.metrics.Summary
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -41,7 +42,9 @@ class PaymentExternalSystemAdapterImpl(
     private val rateLimitPerSec = properties.rateLimitPerSec
     private val parallelRequests = properties.parallelRequests
 
-    private val client = OkHttpClient.Builder().build()
+    private val client = OkHttpClient.Builder()
+        .readTimeout(Duration.ofSeconds(8))////////
+        .build()
 
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter(
         rate = rateLimitPerSec.toLong(),
@@ -69,6 +72,20 @@ class PaymentExternalSystemAdapterImpl(
             .description("Payments completed total")
 //            .tag("account", accountName)
             .register(meterRegistry)
+
+    // Метрика для тайм-аутов
+    private val paymentTimeoutCounter: Counter = Counter.builder("payment_timeout_total")//////
+        .description("Total payment timeout")
+        .register(meterRegistry)
+
+    private val requestLatency: Summary = Summary.builder()
+        .name("request_latency")
+        .help("Request latency.")
+        .quantile(0.5, 0.01)
+        .quantile(0.8, 0.005)
+        .quantile(0.99, 0.005)
+        .labelNames("status_code")
+        .register();
 
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): Boolean {
@@ -102,14 +119,18 @@ class PaymentExternalSystemAdapterImpl(
                     mapper.readValue(response.body?.string(), ExternalSysResponse::class.java)
                 } catch (e: Exception) {
                     paymentFailureTotal.increment()
-                    logger.error("[$accountName] [ERROR] Payment processed for txId: $transactionId, payment: $paymentId, result code: ${response.code}, reason: ${response.body?.string()}")
+                    logger.error("[$accountName] [ERROR] Payment processed for txId: $transactionId, " +
+                            "payment: $paymentId, result code: ${response.code}, reason: ${response.body?.string()}")
                     ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
                 }
 
-                logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
+                logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, " +
+                        "succeeded: ${body.result}, message: ${body.message}")
 
-                if (body.result) {
-                    result = true
+                result = body.result/////////
+
+                if (result) {
+//                    result = true
                     paymentSuccessTotal.increment()
                 } else {
                     paymentFailureTotal.increment()
@@ -126,6 +147,7 @@ class PaymentExternalSystemAdapterImpl(
             paymentFailureTotal.increment()
             when (e) {
                 is SocketTimeoutException -> {
+                    paymentTimeoutCounter.increment()//////////
                     logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
                     paymentESService.update(paymentId) {
                         it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
@@ -140,12 +162,13 @@ class PaymentExternalSystemAdapterImpl(
                     }
                 }
             }
+            return false///////////////
         }
         finally {
             ongoingWindow.release()
             paymentCompletedTotal.increment()
         }
-        return true
+//        return true///////////////
     }
 
     override fun price() = properties.price

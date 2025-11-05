@@ -1,14 +1,17 @@
 package ru.quipy.payments.logic
 
 //import io.prometheus.metrics.core.metrics.Gauge
-import io.micrometer.core.instrument.Gauge
+import io.micrometer.core.instrument.Counter
+//import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
+//import io.prometheus.metrics.core.metrics.Counter
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import ru.quipy.common.utils.CallerBlockingRejectedExecutionHandler
 import ru.quipy.common.utils.CompositeRateLimiter
+import ru.quipy.common.utils.CountingErrorMeter
 import ru.quipy.common.utils.LeakingBucketRateLimiter
 import ru.quipy.common.utils.NamedThreadFactory
 import ru.quipy.common.utils.OngoingWindow
@@ -49,6 +52,18 @@ class OrderPayer {
 
     private val bucketQueue = LeakingBucketRateLimiter(rate = 10, window = Duration.ofSeconds(1), bucketSize = 10)
 
+    // Метрика для подсчета повторных вызовов//////////////
+    private val paymentRetryCounter: Counter by lazy {
+        Counter.builder("payment_retry_attempts_total")
+        .description("Total payment retry attempts")
+        .register(meterRegistry)}
+
+    // Метрика для анализа возможностей retry/////////////////
+    private val paymentRetryOpportunityCounter: Counter by lazy {
+        Counter.builder("payment_retry_opportunity_total")
+            .description("Payments that could be retried (timeout with time remaining)")
+            .register(meterRegistry)
+    }
 
     fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long? {
 
@@ -70,12 +85,28 @@ class OrderPayer {
             }
             logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
 
-            while (!result && System.currentTimeMillis() < deadline){
+            var attempt = 0 ////////////
+
+            while (!result && System.currentTimeMillis() < deadline) {
+
+                attempt++ ////////
+                val attemptStartTime = System.currentTimeMillis()/////
+
                 result = paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
+
+                val timeLeft = deadline - attemptStartTime//////////
+                logger.info("Payment $paymentId attempt #$attempt: result=$result, timeLeft=${timeLeft}ms")///////
+
+                if (!result) {////////////
+                    if (timeLeft > 2000) {
+                        paymentRetryOpportunityCounter.increment()
+//                        logger.info("Retry opportunity: Payment $paymentId could be retried, $timeLeft ms left")
+                    }
+                    paymentRetryCounter.increment()
+                }
             }
-
-
-        }
+//            logger.info("Payment $paymentId final: result=$result, totalAttempts=$attempt")
+            }
         return createdAt
     }
 }
