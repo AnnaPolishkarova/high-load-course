@@ -5,6 +5,7 @@ import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.prometheus.metrics.core.metrics.Summary
+import io.prometheus.metrics.model.registry.PrometheusRegistry
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
@@ -18,7 +19,9 @@ import ru.quipy.common.utils.SlidingWindowRateLimiter
 import java.net.SocketTimeoutException
 import java.time.Duration
 import java.util.*
-
+import kotlin.time.DurationUnit
+import kotlin.time.measureTime
+import io.micrometer.core.instrument.Timer
 
 // Advice: always treat time as a Duration
 class PaymentExternalSystemAdapterImpl(
@@ -38,6 +41,7 @@ class PaymentExternalSystemAdapterImpl(
 
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
+    private val timeOut = Duration.ofSeconds(2)
     private val requestAverageProcessingTime = properties.averageProcessingTime
     private val rateLimitPerSec = properties.rateLimitPerSec
     private val parallelRequests = properties.parallelRequests
@@ -48,45 +52,36 @@ class PaymentExternalSystemAdapterImpl(
 
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter(
         rate = rateLimitPerSec.toLong(),
-        window = Duration.ofSeconds(1))
+        window = Duration.ofSeconds(1)
+    )
 
     private val ongoingWindow = OngoingWindow(parallelRequests)
 
     // Объявление счетчиков метрик
     private val paymentAttemptsTotal: Counter = Counter.builder("payment_attempts_total")
-            .description("Payment attempts sent to provider")
+        .description("Payment attempts sent to provider")
 //            .tag("account", accountName)
-            .register(meterRegistry)
+        .register(meterRegistry)
 
     private val paymentSuccessTotal: Counter = Counter.builder("payment_success_total")
-            .description("Successfully processed payments")
+        .description("Successfully processed payments")
 //            .tag("account", accountName)
-            .register(meterRegistry)
+        .register(meterRegistry)
 
     private val paymentFailureTotal: Counter = Counter.builder("payment_failure_total")
-            .description("Failed payments")
+        .description("Failed payments")
 //            .tag("account", accountName)
-            .register(meterRegistry)
+        .register(meterRegistry)
 
     private val paymentCompletedTotal: Counter = Counter.builder("payment_completed_total")
-            .description("Payments completed total")
+        .description("Payments completed total")
 //            .tag("account", accountName)
-            .register(meterRegistry)
+        .register(meterRegistry)
 
     // Метрика для тайм-аутов
     private val paymentTimeoutCounter: Counter = Counter.builder("payment_timeout_total")//////
         .description("Total payment timeout")
         .register(meterRegistry)
-
-    private val requestLatency: Summary = Summary.builder()
-        .name("request_latency")
-        .help("Request latency.")
-        .quantile(0.5, 0.01)
-        .quantile(0.8, 0.005)
-        .quantile(0.99, 0.005)
-        .labelNames("status_code")
-        .register();
-
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): Boolean {
         logger.warn("[$accountName] Submitting payment request for payment $paymentId")
@@ -103,12 +98,14 @@ class PaymentExternalSystemAdapterImpl(
 
         logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
 
+        var paymentLatency = measureTime { }
+
         try {
             ongoingWindow.acquire()
             slidingWindowRateLimiter.tickBlocking()
 
             val request = Request.Builder().run {
-                url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
+                url("http://$paymentProviderHostPort/external/process?timeout=$timeOut&serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
                 post(emptyBody)
             }.build()
 
@@ -119,13 +116,17 @@ class PaymentExternalSystemAdapterImpl(
                     mapper.readValue(response.body?.string(), ExternalSysResponse::class.java)
                 } catch (e: Exception) {
                     paymentFailureTotal.increment()
-                    logger.error("[$accountName] [ERROR] Payment processed for txId: $transactionId, " +
-                            "payment: $paymentId, result code: ${response.code}, reason: ${response.body?.string()}")
+                    logger.error(
+                        "[$accountName] [ERROR] Payment processed for txId: $transactionId, " +
+                                "payment: $paymentId, result code: ${response.code}, reason: ${response.body?.string()}"
+                    )
                     ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
                 }
 
-                logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, " +
-                        "succeeded: ${body.result}, message: ${body.message}")
+                logger.warn(
+                    "[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, " +
+                            "succeeded: ${body.result}, message: ${body.message}"
+                )
 
                 result = body.result/////////
 
@@ -142,6 +143,7 @@ class PaymentExternalSystemAdapterImpl(
                     it.logProcessing(body.result, now(), transactionId, reason = body.message)
                 }
             }
+
             return result
         } catch (e: Exception) {
             paymentFailureTotal.increment()
@@ -163,8 +165,7 @@ class PaymentExternalSystemAdapterImpl(
                 }
             }
             return false///////////////
-        }
-        finally {
+        } finally {
             ongoingWindow.release()
             paymentCompletedTotal.increment()
         }

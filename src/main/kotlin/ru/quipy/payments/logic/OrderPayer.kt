@@ -4,6 +4,7 @@ package ru.quipy.payments.logic
 import io.micrometer.core.instrument.Counter
 //import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 //import io.prometheus.metrics.core.metrics.Counter
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -23,6 +24,8 @@ import java.util.*
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import kotlin.time.DurationUnit
+import kotlin.time.measureTime
 
 @Service
 class OrderPayer {
@@ -65,6 +68,13 @@ class OrderPayer {
             .register(meterRegistry)
     }
 
+    private val requestLatency: Timer by lazy {
+        Timer.builder("request_latency")
+            .description("Request latency.")
+            .publishPercentiles(0.5, 0.8, 0.9)
+            .register(meterRegistry)
+    }
+
     fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long? {
 
         val createdAt = System.currentTimeMillis()
@@ -87,12 +97,16 @@ class OrderPayer {
 
             var attempt = 0 ////////////
 
-            while (!result && System.currentTimeMillis() < deadline) {
+            while (!result && (deadline - System.currentTimeMillis()) >= 0) {
 
                 attempt++ ////////
                 val attemptStartTime = System.currentTimeMillis()/////
 
-                result = paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
+                var paymentTime = measureTime {
+                    result = paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
+                }
+
+                requestLatency.record(paymentTime.toLong(DurationUnit.MILLISECONDS), TimeUnit.MILLISECONDS)
 
                 val timeLeft = deadline - attemptStartTime//////////
                 logger.info("Payment $paymentId attempt #$attempt: result=$result, timeLeft=${timeLeft}ms")///////
