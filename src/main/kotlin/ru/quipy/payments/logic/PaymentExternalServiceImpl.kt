@@ -47,7 +47,6 @@ class PaymentExternalSystemAdapterImpl(
     private val parallelRequests = properties.parallelRequests
 
     private val client = OkHttpClient.Builder()
-        .readTimeout(Duration.ofSeconds(8))////////
         .build()
 
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter(
@@ -98,8 +97,6 @@ class PaymentExternalSystemAdapterImpl(
 
         logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
 
-        var paymentLatency = measureTime { }
-
         try {
             ongoingWindow.acquire()
             slidingWindowRateLimiter.tickBlocking()
@@ -131,7 +128,6 @@ class PaymentExternalSystemAdapterImpl(
                 result = body.result/////////
 
                 if (result) {
-//                    result = true
                     paymentSuccessTotal.increment()
                 } else {
                     paymentFailureTotal.increment()
@@ -169,7 +165,6 @@ class PaymentExternalSystemAdapterImpl(
             ongoingWindow.release()
             paymentCompletedTotal.increment()
         }
-//        return true///////////////
     }
 
     override fun price() = properties.price

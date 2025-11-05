@@ -1,11 +1,8 @@
 package ru.quipy.payments.logic
 
-//import io.prometheus.metrics.core.metrics.Gauge
 import io.micrometer.core.instrument.Counter
-//import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
-//import io.prometheus.metrics.core.metrics.Counter
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
