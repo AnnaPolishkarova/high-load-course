@@ -78,7 +78,7 @@ class PaymentExternalSystemAdapterImpl(
         .register(meterRegistry)
 
     // Метрика для тайм-аутов
-    private val paymentTimeoutCounter: Counter = Counter.builder("payment_timeout_total")//////
+    private val paymentTimeoutCounter: Counter = Counter.builder("payment_timeout_total")
         .description("Total payment timeout")
         .register(meterRegistry)
 
@@ -125,7 +125,7 @@ class PaymentExternalSystemAdapterImpl(
                             "succeeded: ${body.result}, message: ${body.message}"
                 )
 
-                result = body.result/////////
+                result = body.result
 
                 if (result) {
                     paymentSuccessTotal.increment()
@@ -145,7 +145,7 @@ class PaymentExternalSystemAdapterImpl(
             paymentFailureTotal.increment()
             when (e) {
                 is SocketTimeoutException -> {
-                    paymentTimeoutCounter.increment()//////////
+                    paymentTimeoutCounter.increment()
                     logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
                     paymentESService.update(paymentId) {
                         it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
@@ -160,7 +160,7 @@ class PaymentExternalSystemAdapterImpl(
                     }
                 }
             }
-            return false///////////////
+            return false
         } finally {
             ongoingWindow.release()
             paymentCompletedTotal.increment()

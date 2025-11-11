@@ -41,24 +41,28 @@ class OrderPayer {
     private lateinit var meterRegistry: MeterRegistry
 
     private val paymentExecutor = ThreadPoolExecutor(
-        16,
-        16,
+//        16,
+        50,
+//        16,
+        50,
         0L,
         TimeUnit.MILLISECONDS,
-        LinkedBlockingQueue(64_000),
+//        LinkedBlockingQueue(64_000),
+        LinkedBlockingQueue(1_000),
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
     )
 
-    private val bucketQueue = LeakingBucketRateLimiter(rate = 10, window = Duration.ofSeconds(1), bucketSize = 10)
+//    private val bucketQueue = LeakingBucketRateLimiter(rate = 10, window = Duration.ofSeconds(1), bucketSize = 10)
+    private val bucketQueue = LeakingBucketRateLimiter(rate = 120, window = Duration.ofSeconds(1), bucketSize = 50)
 
-    // Метрика для подсчета повторных вызовов//////////////
+    // Метрика для подсчета повторных вызовов
     private val paymentRetryCounter: Counter by lazy {
         Counter.builder("payment_retry_attempts_total")
         .description("Total payment retry attempts")
         .register(meterRegistry)}
 
-    // Метрика для анализа возможностей retry/////////////////
+    // Метрика для анализа возможностей retry
     private val paymentRetryOpportunityCounter: Counter by lazy {
         Counter.builder("payment_retry_opportunity_total")
             .description("Payments that could be retried (timeout with time remaining)")
@@ -92,12 +96,12 @@ class OrderPayer {
             }
             logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
 
-            var attempt = 0 ////////////
+            var attempt = 0
 
             while (!result && (deadline - System.currentTimeMillis()) >= 0) {
 
-                attempt++ ////////
-                val attemptStartTime = System.currentTimeMillis()/////
+                attempt++
+                val attemptStartTime = System.currentTimeMillis()
 
                 var paymentTime = measureTime {
                     result = paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
@@ -105,18 +109,16 @@ class OrderPayer {
 
                 requestLatency.record(paymentTime.toLong(DurationUnit.MILLISECONDS), TimeUnit.MILLISECONDS)
 
-                val timeLeft = deadline - attemptStartTime//////////
-                logger.info("Payment $paymentId attempt #$attempt: result=$result, timeLeft=${timeLeft}ms")///////
+                val timeLeft = deadline - attemptStartTime
+                logger.info("Payment $paymentId attempt #$attempt: result=$result, timeLeft=${timeLeft}ms")
 
-                if (!result) {////////////
+                if (!result) {
                     if (timeLeft > 2000) {
                         paymentRetryOpportunityCounter.increment()
-//                        logger.info("Retry opportunity: Payment $paymentId could be retried, $timeLeft ms left")
                     }
                     paymentRetryCounter.increment()
                 }
             }
-//            logger.info("Payment $paymentId final: result=$result, totalAttempts=$attempt")
             }
         return createdAt
     }
