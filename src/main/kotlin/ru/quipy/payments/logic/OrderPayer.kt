@@ -47,14 +47,13 @@ class OrderPayer {
         50,
         0L,
         TimeUnit.MILLISECONDS,
-//        LinkedBlockingQueue(64_000),
-        LinkedBlockingQueue(1_000),
+        LinkedBlockingQueue(64_000),
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
     )
 
 //    private val bucketQueue = LeakingBucketRateLimiter(rate = 10, window = Duration.ofSeconds(1), bucketSize = 10)
-    private val bucketQueue = LeakingBucketRateLimiter(rate = 120, window = Duration.ofSeconds(1), bucketSize = 50)
+    private val bucketQueue = LeakingBucketRateLimiter(rate = 12, window = Duration.ofMillis(100), bucketSize = 83)
 
     // Метрика для подсчета повторных вызовов
     private val paymentRetryCounter: Counter by lazy {

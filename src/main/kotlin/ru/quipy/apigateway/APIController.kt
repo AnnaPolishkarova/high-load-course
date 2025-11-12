@@ -79,7 +79,7 @@ class APIController (
         } ?: throw IllegalArgumentException("No such order $orderId")
 
         val createdAt = orderPayer.processPayment(orderId, order.price, paymentId, deadline)
-        val timestamp = System.currentTimeMillis() + 3500
+        val timestamp = System.currentTimeMillis() + 500
         if (createdAt == null) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header("Retry-After", timestamp.toString()).build();
