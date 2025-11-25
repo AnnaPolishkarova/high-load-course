@@ -8,6 +8,7 @@ import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
 import java.time.Duration
 import java.util.*
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -21,11 +22,21 @@ class PaymentSystemImpl(
         val logger = LoggerFactory.getLogger(PaymentSystemImpl::class.java)
     }
 
-    override fun submitPaymentRequest(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): Boolean {
-        var result = true
-        for (account in paymentAccounts) {
-            result = result && account.performPaymentAsync(paymentId, amount, paymentStartedAt, deadline)
+    override fun submitPaymentRequest(
+        paymentId: UUID,
+        amount: Int,
+        paymentStartedAt: Long,
+        deadline: Long
+    ): CompletableFuture<Boolean> {
+        // Собираем все futures от адаптеров
+        val futures: List<CompletableFuture<Boolean>> = paymentAccounts.map { account ->
+            account.performPaymentAsync(paymentId, amount, paymentStartedAt, deadline)
         }
-        return result
+
+        // CompletableFuture, который завершится когда все futures завершены
+        return CompletableFuture.allOf(*futures.toTypedArray()).thenApply {
+            // После allOf — все futures завершены, можно безопасно join() и агрегировать (AND)
+            futures.map { it.join() }.all { it }
+        }
     }
 }
