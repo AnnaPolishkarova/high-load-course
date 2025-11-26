@@ -51,7 +51,6 @@ class OrderPayer {
             setMaximumPoolSize(5000)
             setKeepAliveTime(0L, TimeUnit.MILLISECONDS)
             setRejectedExecutionHandler(CallerBlockingRejectedExecutionHandler())
-            // Позволяет удалять отменённые задачи из очереди
             setRemoveOnCancelPolicy(true)
         }
     }
@@ -155,7 +154,7 @@ class OrderPayer {
                         scheduleRetry(paymentId, amount, createdAt, deadline, attempt)
                     }
                 }
-            }, paymentExecutor)  // callback тоже идёт в ваш executor и НЕ блокирует его
+            }, paymentExecutor)
     }
 
     private fun scheduleRetry(

@@ -65,7 +65,7 @@ class PaymentExternalSystemAdapterImpl(
 
     private val client = OkHttpClient.Builder()
         .dispatcher(dispatcher)
-        .connectionPool(ConnectionPool(20000, 20, TimeUnit.SECONDS))
+        .connectionPool(ConnectionPool(parallelRequests, 20, TimeUnit.SECONDS))
         .readTimeout(Duration.ofSeconds(30))
         .build()
 
@@ -250,8 +250,6 @@ class PaymentExternalSystemAdapterImpl(
                 }
             }
             ongoingWindow.release()
-        } finally {
-            paymentCompletedTotal.increment()
         }
 
         return cf
