@@ -66,7 +66,6 @@ class PaymentExternalSystemAdapterImpl(
     private val clients: List<OkHttpClient> = List(15) { idx ->
         val exec = Executors.newFixedThreadPool(1000)
         val dispatcher = Dispatcher(exec).apply {
-            // keep these high because we want per-client concurrency
             maxRequests = 1000
             maxRequestsPerHost = 1000
         }
