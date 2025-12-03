@@ -29,10 +29,21 @@ import okhttp3.Dispatcher
 import okhttp3.Protocol
 import okhttp3.Response
 import java.io.IOException
+import java.security.cert.X509Certificate
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 import kotlin.math.max
+
+
+class TrustAllCerts : X509TrustManager {
+    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+}
+
 
 // Advice: always treat time as a Duration
 class PaymentExternalSystemAdapterImpl(
@@ -64,10 +75,16 @@ class PaymentExternalSystemAdapterImpl(
         maxRequestsPerHost = parallelRequests
     }
 
+    private val sslContext = SSLContext.getInstance("TLS").apply {
+        init(null, null, null)
+    }
+
     private val client = OkHttpClient.Builder()
         .dispatcher(dispatcher)
         .connectionPool(ConnectionPool(1000, 20, TimeUnit.SECONDS))
         .readTimeout(Duration.ofSeconds(30))
+        .sslSocketFactory(sslContext.socketFactory, TrustAllCerts())
+        .hostnameVerifier { _, _ -> true }
         .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
         .build()
 
