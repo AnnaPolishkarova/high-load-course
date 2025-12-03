@@ -25,6 +25,7 @@ import io.micrometer.core.instrument.Timer
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.ConnectionPool
+import okhttp3.ConnectionSpec
 import okhttp3.Dispatcher
 import okhttp3.Protocol
 import okhttp3.Response
@@ -77,9 +78,13 @@ class PaymentExternalSystemAdapterImpl(
 
     private val client = OkHttpClient.Builder()
         .dispatcher(dispatcher)
-        .connectionPool(ConnectionPool(1000, 20, TimeUnit.SECONDS))
+        .connectionPool(ConnectionPool(20000, 10, TimeUnit.SECONDS))
         .readTimeout(Duration.ofSeconds(30))
+        .retryOnConnectionFailure(true)
         .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
+        .connectionSpecs(listOf(
+            ConnectionSpec.CLEARTEXT
+        ))
         .build()
 
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter(
