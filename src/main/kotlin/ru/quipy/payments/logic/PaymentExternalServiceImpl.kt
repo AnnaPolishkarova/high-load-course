@@ -34,16 +34,10 @@ import java.security.cert.X509Certificate
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 import kotlin.math.max
-
-
-class TrustAllCerts : X509TrustManager {
-    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-}
 
 
 // Advice: always treat time as a Duration
@@ -69,20 +63,24 @@ class PaymentExternalSystemAdapterImpl(
     private val rateLimitPerSec = properties.rateLimitPerSec
     private val parallelRequests = properties.parallelRequests
 
-    private val dispatcherExecutor = Executors.newFixedThreadPool(1000)
+    private val clients: List<OkHttpClient> = List(15) { idx ->
+        val exec = Executors.newFixedThreadPool(1000)
+        val dispatcher = Dispatcher(exec).apply {
+            // keep these high because we want per-client concurrency
+            maxRequests = 1000
+            maxRequestsPerHost = 1000
+        }
 
-    private val dispatcher = Dispatcher(dispatcherExecutor).apply {
-        maxRequests = 1000
-        maxRequestsPerHost = 1000
+        OkHttpClient.Builder()
+            .dispatcher(dispatcher)
+            .connectionPool(ConnectionPool(1, 10, TimeUnit.SECONDS))
+            .readTimeout(Duration.ofSeconds(30))
+            .retryOnConnectionFailure(true)
+            .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
+            .build()
     }
 
-    private val client = OkHttpClient.Builder()
-        .dispatcher(dispatcher)
-        .connectionPool(ConnectionPool(1000, 10, TimeUnit.SECONDS))
-        .readTimeout(Duration.ofSeconds(30))
-        .retryOnConnectionFailure(true)
-        .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
-        .build()
+    private val clientIndex = AtomicInteger(0)
 
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter(
         rate = rateLimitPerSec.toLong(),
@@ -150,7 +148,8 @@ class PaymentExternalSystemAdapterImpl(
                 post(emptyBody)
             }.build()
 
-
+            val idx = clientIndex.getAndIncrement()
+            val client = clients[(idx and Int.MAX_VALUE) % clients.size]
 
             client.newCall(request).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
