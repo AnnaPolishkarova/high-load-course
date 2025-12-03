@@ -75,17 +75,11 @@ class PaymentExternalSystemAdapterImpl(
         maxRequestsPerHost = parallelRequests
     }
 
-    private val sslContext = SSLContext.getInstance("TLS").apply {
-        init(null, null, null)
-    }
-
     private val client = OkHttpClient.Builder()
         .dispatcher(dispatcher)
         .connectionPool(ConnectionPool(1000, 20, TimeUnit.SECONDS))
         .readTimeout(Duration.ofSeconds(30))
-        .sslSocketFactory(sslContext.socketFactory, TrustAllCerts())
-        .hostnameVerifier { _, _ -> true }
-        .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
+        .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
         .build()
 
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter(
@@ -144,9 +138,9 @@ class PaymentExternalSystemAdapterImpl(
             slidingWindowRateLimiter.tickBlocking()
 
             var urlString = if (timeOut != Duration.ofSeconds(0)) {
-                "https://$paymentProviderHostPort/external/process?timeout=$timeOut&serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
+                "http://$paymentProviderHostPort/external/process?timeout=$timeOut&serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
             } else {
-                "https://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
+                "http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
             }
 
             val request = Request.Builder().run {
