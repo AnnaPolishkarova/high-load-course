@@ -68,7 +68,7 @@ class PaymentExternalSystemAdapterImpl(
         .dispatcher(dispatcher)
         .connectionPool(ConnectionPool(1000, 20, TimeUnit.SECONDS))
         .readTimeout(Duration.ofSeconds(30))
-        .protocols(listOf(Protocol.HTTP_2))
+        .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
         .build()
 
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter(
