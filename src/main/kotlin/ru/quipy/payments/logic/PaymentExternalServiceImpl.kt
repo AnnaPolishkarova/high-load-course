@@ -26,6 +26,7 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
+import okhttp3.Protocol
 import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.CompletableFuture
@@ -56,7 +57,7 @@ class PaymentExternalSystemAdapterImpl(
     private val rateLimitPerSec = properties.rateLimitPerSec
     private val parallelRequests = properties.parallelRequests
 
-    private val dispatcherExecutor = Executors.newFixedThreadPool(max(200, parallelRequests / 2))
+    private val dispatcherExecutor = Executors.newFixedThreadPool(1000)
 
     private val dispatcher = Dispatcher(dispatcherExecutor).apply {
         maxRequests = parallelRequests
@@ -65,8 +66,9 @@ class PaymentExternalSystemAdapterImpl(
 
     private val client = OkHttpClient.Builder()
         .dispatcher(dispatcher)
-        .connectionPool(ConnectionPool(parallelRequests, 20, TimeUnit.SECONDS))
+        .connectionPool(ConnectionPool(1000, 20, TimeUnit.SECONDS))
         .readTimeout(Duration.ofSeconds(30))
+        .protocols(listOf(Protocol.HTTP_2))
         .build()
 
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter(
@@ -125,9 +127,9 @@ class PaymentExternalSystemAdapterImpl(
             slidingWindowRateLimiter.tickBlocking()
 
             var urlString = if (timeOut != Duration.ofSeconds(0)) {
-                "http://$paymentProviderHostPort/external/process?timeout=$timeOut&serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
+                "https://$paymentProviderHostPort/external/process?timeout=$timeOut&serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
             } else {
-                "http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
+                "https://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
             }
 
             val request = Request.Builder().run {

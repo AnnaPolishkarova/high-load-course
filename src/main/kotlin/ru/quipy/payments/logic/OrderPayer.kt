@@ -44,11 +44,11 @@ class OrderPayer {
     private lateinit var meterRegistry: MeterRegistry
 
     private val paymentExecutor = object : ScheduledThreadPoolExecutor(
-        5000,  // corePoolSize
+        1000,  // corePoolSize
         NamedThreadFactory("payment-submission-executor")
     ) {
         init {
-            setMaximumPoolSize(5000)
+            setMaximumPoolSize(1000)
             setKeepAliveTime(0L, TimeUnit.MILLISECONDS)
             setRejectedExecutionHandler(CallerBlockingRejectedExecutionHandler())
             setRemoveOnCancelPolicy(true)
