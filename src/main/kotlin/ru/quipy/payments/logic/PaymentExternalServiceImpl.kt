@@ -69,11 +69,11 @@ class PaymentExternalSystemAdapterImpl(
     private val rateLimitPerSec = properties.rateLimitPerSec
     private val parallelRequests = properties.parallelRequests
 
-    private val dispatcherExecutor = Executors.newFixedThreadPool(10000)
+    private val dispatcherExecutor = Executors.newFixedThreadPool(1000)
 
     private val dispatcher = Dispatcher(dispatcherExecutor).apply {
-        maxRequests = parallelRequests
-        maxRequestsPerHost = parallelRequests
+        maxRequests = 1000
+        maxRequestsPerHost = 1000
     }
 
     private val client = OkHttpClient.Builder()
@@ -81,7 +81,7 @@ class PaymentExternalSystemAdapterImpl(
         .connectionPool(ConnectionPool(1000, 10, TimeUnit.SECONDS))
         .readTimeout(Duration.ofSeconds(30))
         .retryOnConnectionFailure(true)
-        .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
+        .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
         .build()
 
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter(
