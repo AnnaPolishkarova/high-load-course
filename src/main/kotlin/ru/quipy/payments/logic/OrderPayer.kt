@@ -83,13 +83,12 @@ class OrderPayer {
             return null
         }
         paymentExecutor.submit {
-
-            retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
-
             val createdEvent = paymentESService.create {
                 it.create(paymentId, orderId, amount)
             }
             logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
+
+            retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
         }
 
         return createdAt
