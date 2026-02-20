@@ -48,7 +48,7 @@ class OrderPayer {
         NamedThreadFactory("payment-submission-executor")
     ) {
         init {
-            setMaximumPoolSize(250)
+            setMaximumPoolSize(2500)
             setKeepAliveTime(0L, TimeUnit.MILLISECONDS)
             setRejectedExecutionHandler(CallerBlockingRejectedExecutionHandler())
             setRemoveOnCancelPolicy(true)
