@@ -83,6 +83,9 @@ class OrderPayer {
             return null
         }
 
+        val currentTime = System.currentTimeMillis()
+        logger.info("Now: $currentTime Deadline: $deadline")
+
         paymentExecutor.submit {
 
             retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)

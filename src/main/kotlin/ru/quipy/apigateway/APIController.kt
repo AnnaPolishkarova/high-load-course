@@ -77,8 +77,7 @@ class APIController (
             orderRepository.save(it.copy(status = OrderStatus.PAYMENT_IN_PROGRESS))
             it
         } ?: throw IllegalArgumentException("No such order $orderId")
-        val currentTime = System.currentTimeMillis()
-        logger.trace("Now: $currentTime Deadline: $deadline")
+
         val createdAt = orderPayer.processPayment(orderId, order.price, paymentId, deadline)
         val timestamp = System.currentTimeMillis() + 500
         if (createdAt == null) {
