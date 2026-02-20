@@ -82,7 +82,6 @@ class OrderPayer {
         if (!bucketQueue.tick()) {
             return null
         }
-
         paymentExecutor.submit {
 
             retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
@@ -116,7 +115,7 @@ class OrderPayer {
 
         future
             .orTimeout(timeLeft, TimeUnit.MILLISECONDS)
-            .whenComplete({ success, error ->
+            .whenCompleteAsync({ success, error ->
 
                 val elapsed = System.currentTimeMillis() - start
                 requestLatency.record(elapsed, TimeUnit.MILLISECONDS)
