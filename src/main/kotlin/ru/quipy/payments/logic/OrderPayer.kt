@@ -168,9 +168,7 @@ class OrderPayer {
         val timeLeft = deadline - now
         if (timeLeft <= 0) return
 
-        val baseBackoff = (100L shl (attempt - 1)).coerceAtMost(2000L)
-        val jitter = ThreadLocalRandom.current().nextLong(0, 100L)
-        val delayMs = minOf(baseBackoff + jitter, timeLeft)
+        val delayMs = 0L
 
         paymentExecutor.schedule(
             {
