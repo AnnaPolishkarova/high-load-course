@@ -55,7 +55,7 @@ class OrderPayer {
         }
     }
     // ПОДОГНАТЬ ЭТУ ДИЧЬ ПОД АККАУНТ
-    private val bucketQueue = LeakingBucketRateLimiter(rate = 2000, window = Duration.ofMillis(1), bucketSize = 8000)
+    private val bucketQueue = LeakingBucketRateLimiter(rate = 2000, window = Duration.ofMillis(500), bucketSize = 8000)
 
     // Метрика для подсчета повторных вызовов
     private val paymentRetryCounter: Counter by lazy {
@@ -85,12 +85,12 @@ class OrderPayer {
 
         paymentExecutor.submit {
 
+            retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
+
             val createdEvent = paymentESService.create {
                 it.create(paymentId, orderId, amount)
             }
             logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
-
-            retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
         }
 
         return createdAt
