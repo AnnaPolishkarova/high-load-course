@@ -63,7 +63,7 @@ class PaymentExternalSystemAdapterImpl(
     private val rateLimitPerSec = properties.rateLimitPerSec
     private val parallelRequests = properties.parallelRequests
 
-    private val clients: List<OkHttpClient> = List(15) { idx ->
+    private val clients: List<OkHttpClient> = List(50) { idx ->
         val exec = Executors.newFixedThreadPool(max(200, parallelRequests))
         val dispatcher = Dispatcher(exec).apply {
             maxRequests = max(200, parallelRequests)
