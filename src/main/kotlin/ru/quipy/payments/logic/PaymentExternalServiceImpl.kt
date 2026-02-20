@@ -16,6 +16,7 @@ import ru.quipy.common.utils.OngoingWindow
 import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
 import ru.quipy.common.utils.SlidingWindowRateLimiter
+import ru.quipy.domain.Event
 import java.net.SocketTimeoutException
 import java.time.Duration
 import java.util.*
@@ -63,11 +64,11 @@ class PaymentExternalSystemAdapterImpl(
     private val rateLimitPerSec = properties.rateLimitPerSec
     private val parallelRequests = properties.parallelRequests
 
-    private val clients: List<OkHttpClient> = List(50) { idx ->
-        val exec = Executors.newFixedThreadPool(max(200, parallelRequests))
+    private val clients: List<OkHttpClient> = List(15) { idx ->
+        val exec = Executors.newFixedThreadPool(max(200, parallelRequests / 10))
         val dispatcher = Dispatcher(exec).apply {
-            maxRequests = max(200, parallelRequests)
-            maxRequestsPerHost = max(200, parallelRequests)
+            maxRequests = max(200, parallelRequests / 10)
+            maxRequestsPerHost = max(200, parallelRequests / 10)
         }
 
         OkHttpClient.Builder()
@@ -77,6 +78,27 @@ class PaymentExternalSystemAdapterImpl(
             .retryOnConnectionFailure(true)
             .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
             .build()
+    }
+
+    // Пул потоков для сервиса.
+    private val esExecutor = Executors.newFixedThreadPool(
+        max(4, parallelRequests)
+    )
+
+    private fun <E : Event<PaymentAggregate>> updatePaymentAsync(
+        paymentId: UUID,
+        block: (PaymentAggregateState) -> E
+    ) {
+        esExecutor.submit {
+            try {
+                // trailing lambda -> выбирается нужная перегрузка update(...)
+                paymentESService.update(paymentId) { aggregate ->
+                    block(aggregate) // возвращаем E
+                }
+            } catch (e: Exception) {
+                logger.error("[$accountName] Error while updating ES for payment $paymentId", e)
+            }
+        }
     }
 
     private val clientIndex = AtomicInteger(0)
@@ -123,7 +145,7 @@ class PaymentExternalSystemAdapterImpl(
 
         // Вне зависимости от исхода оплаты важно отметить что она была отправлена.
         // Это требуется сделать ВО ВСЕХ СЛУЧАЯХ, поскольку эта информация используется сервисом тестирования.
-        paymentESService.update(paymentId) {
+        updatePaymentAsync(paymentId) {
             it.logSubmission(success = true, transactionId, now(), Duration.ofMillis(now() - paymentStartedAt))
         }
 
@@ -159,7 +181,7 @@ class PaymentExternalSystemAdapterImpl(
                             paymentTimeoutCounter.increment()
                             logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
                             try {
-                                paymentESService.update(paymentId) {
+                                updatePaymentAsync(paymentId) {
                                     it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
                                 }
                             } catch (u: Exception) {
@@ -168,7 +190,7 @@ class PaymentExternalSystemAdapterImpl(
                         } else {
                             logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", e)
                             try {
-                                paymentESService.update(paymentId) {
+                                updatePaymentAsync(paymentId) {
                                     it.logProcessing(false, now(), transactionId, reason = e.message)
                                 }
                             } catch (u: Exception) {
@@ -218,7 +240,7 @@ class PaymentExternalSystemAdapterImpl(
                         // Здесь мы обновляем состояние оплаты в зависимости от результата в базе данных оплат.
                         // Это требуется сделать ВО ВСЕХ ИСХОДАХ (успешная оплата / неуспешная / ошибочная ситуация)
                         try {
-                            paymentESService.update(paymentId) {
+                            updatePaymentAsync(paymentId) {
                                 it.logProcessing(body.result, now(), transactionId, reason = body.message)
                             }
                         } catch (u: Exception) {
@@ -230,7 +252,7 @@ class PaymentExternalSystemAdapterImpl(
                         logger.error("[$accountName] Error processing response for txId: $transactionId, payment: $paymentId", e)
                         try {
                             paymentFailureTotal.increment()
-                            paymentESService.update(paymentId) {
+                            updatePaymentAsync(paymentId) {
                                 it.logProcessing(false, now(), transactionId, reason = e.message)
                             }
                         } catch (u: Exception) {
@@ -249,7 +271,7 @@ class PaymentExternalSystemAdapterImpl(
                 is SocketTimeoutException -> {
                     paymentTimeoutCounter.increment()
                     logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
-                    paymentESService.update(paymentId) {
+                    updatePaymentAsync(paymentId) {
                         it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
                     }
                 }
@@ -257,7 +279,7 @@ class PaymentExternalSystemAdapterImpl(
                 else -> {
                     logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", e)
 
-                    paymentESService.update(paymentId) {
+                    updatePaymentAsync(paymentId) {
                         it.logProcessing(false, now(), transactionId, reason = e.message)
                     }
                 }
