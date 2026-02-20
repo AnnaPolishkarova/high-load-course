@@ -44,7 +44,7 @@ class OrderPayer {
     private lateinit var meterRegistry: MeterRegistry
 
     private val paymentExecutor = object : ScheduledThreadPoolExecutor(
-        500,  // corePoolSize
+        250,  // corePoolSize
         NamedThreadFactory("payment-submission-executor")
     ) {
         init {
