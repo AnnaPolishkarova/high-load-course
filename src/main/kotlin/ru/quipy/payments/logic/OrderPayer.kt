@@ -116,7 +116,7 @@ class OrderPayer {
 
         future
             .orTimeout(timeLeft, TimeUnit.MILLISECONDS)
-            .whenCompleteAsync({ success, error ->
+            .whenComplete({ success, error ->
 
                 val elapsed = System.currentTimeMillis() - start
                 requestLatency.record(elapsed, TimeUnit.MILLISECONDS)
