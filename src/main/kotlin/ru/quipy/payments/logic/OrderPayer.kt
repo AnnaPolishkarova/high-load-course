@@ -83,9 +83,6 @@ class OrderPayer {
             return null
         }
 
-        val currentTime = System.currentTimeMillis()
-        logger.info("Now: $currentTime Deadline: $deadline")
-
         paymentExecutor.submit {
 
             retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
@@ -109,7 +106,7 @@ class OrderPayer {
         val now = System.currentTimeMillis()
         val timeLeft = deadline - now
         if (timeLeft <= 0) {
-            logger.warn("Payment $paymentId attempt #$attempt aborted: deadline exceeded")
+            logger.warn("Payment $paymentId attempt #$attempt aborted: deadline exceeded. Deadline: $deadline Now: $now")
             return
         }
 

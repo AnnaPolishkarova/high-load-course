@@ -82,7 +82,7 @@ class PaymentExternalSystemAdapterImpl(
 
     // Пул потоков для сервиса.
     private val esExecutor = Executors.newFixedThreadPool(
-        max(4, parallelRequests)
+        max(4, parallelRequests / 10)
     )
 
     private fun <E : Event<PaymentAggregate>> updatePaymentAsync(
