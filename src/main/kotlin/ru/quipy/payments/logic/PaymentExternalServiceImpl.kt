@@ -64,10 +64,10 @@ class PaymentExternalSystemAdapterImpl(
     private val parallelRequests = properties.parallelRequests
 
     private val clients: List<OkHttpClient> = List(15) { idx ->
-        val exec = Executors.newFixedThreadPool(max(200, parallelRequests / 20))
+        val exec = Executors.newFixedThreadPool(max(200, parallelRequests))
         val dispatcher = Dispatcher(exec).apply {
-            maxRequests = max(200, parallelRequests / 20)
-            maxRequestsPerHost = max(200, parallelRequests / 20)
+            maxRequests = max(200, parallelRequests)
+            maxRequestsPerHost = max(200, parallelRequests)
         }
 
         OkHttpClient.Builder()
@@ -152,6 +152,7 @@ class PaymentExternalSystemAdapterImpl(
 
             client.newCall(request).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
+                    try { ongoingWindow.release() } catch (u: Exception) { logger.error("[$accountName] Error releasing ongoingWindow", u) }
                     try {
                         paymentFailureTotal.increment()
                         if (e is SocketTimeoutException) {
@@ -175,13 +176,13 @@ class PaymentExternalSystemAdapterImpl(
                             }
                         }
                     } finally {
-                        try { ongoingWindow.release() } catch (u: Exception) { logger.error("[$accountName] Error releasing ongoingWindow", u) }
                         paymentCompletedTotal.increment()
                         cf.complete(false)
                     }
                 }
 
                 override fun onResponse(call: Call, response: Response) {
+                    try { ongoingWindow.release() } catch (u: Exception) { logger.error("[$accountName] Error releasing ongoingWindow", u) }
                     try {
                         val bodyText = try {
                             response.body?.string()
@@ -238,7 +239,6 @@ class PaymentExternalSystemAdapterImpl(
                             cf.complete(false)
                         }
                     } finally {
-                        try { ongoingWindow.release() } catch (u: Exception) { logger.error("[$accountName] Error releasing ongoingWindow", u) }
                         paymentCompletedTotal.increment()
                     }
                 }
