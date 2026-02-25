@@ -55,7 +55,10 @@ class OrderPayer {
         }
     }
 
-    private val bucketQueue = LeakingBucketRateLimiter(rate = 2000, window = Duration.ofMillis(1000), bucketSize = 8000)
+    private val bucketQueue = LeakingBucketRateLimiter(
+        rate = 4000,
+        window = Duration.ofMillis(1000),
+        bucketSize = 16000)
 
     // Метрика для подсчета повторных вызовов
     private val paymentRetryCounter: Counter by lazy {
