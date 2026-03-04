@@ -18,6 +18,7 @@ import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
 import java.time.Duration
 import java.util.*
+import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ThreadLocalRandom
@@ -82,18 +83,31 @@ class OrderPayer {
             .register(meterRegistry)
     }
 
+    private val dbExecutor = Executors.newFixedThreadPool(100)
+
     fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long? {
         val createdAt = System.currentTimeMillis()
         if (!bucketQueue.tick()) {
             return null
         }
 
+        dbExecutor.execute {
+            try {
+                paymentESService.create {
+                    it.create(paymentId, orderId, amount)
+                }
+            } catch (e: Exception) {
+                logger.error("Payment $paymentId creation failed", e)
+            }
+        }
+
+
         paymentExecutor.submit {
 
-            val createdEvent = paymentESService.create {
-                it.create(paymentId, orderId, amount)
-            }
-            logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
+//            val createdEvent = paymentESService.create {
+//                it.create(paymentId, orderId, amount)
+//            }
+//            logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
 
             retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
         }
@@ -185,6 +199,4 @@ class OrderPayer {
             TimeUnit.MILLISECONDS
         )
     }
-
-
 }
