@@ -149,10 +149,17 @@ class OrderPayer {
                             paymentRetryOpportunityCounter.increment()
                         }
 
-                        logger.warn(
-                            "Payment $paymentId attempt #$attempt failed: ${error.message}, " +
-                                    "timeLeft=${deadline - System.currentTimeMillis()}ms"
-                        )
+                        if (attempt <=1)     ///////////
+                            logger.warn(
+                                "Payment $paymentId attempt #$attempt failed: ${error.message}, " +
+                                        "timeLeft=${deadline - System.currentTimeMillis()}ms"
+                            )
+                        else logger.debug("Payment $paymentId attempt #$attempt failed: ${error.message}")
+
+//                        logger.warn(
+//                            "Payment $paymentId attempt #$attempt failed: ${error.message}, " +
+//                                    "timeLeft=${deadline - System.currentTimeMillis()}ms"
+//                        )
 
                         scheduleRetry(paymentId, amount, createdAt, deadline, attempt)
                     }
@@ -188,7 +195,8 @@ class OrderPayer {
         if (timeLeft <= 0) return
 
         val baseBackoff = (100L shl (attempt - 1)).coerceAtMost(2000L)
-        val jitter = ThreadLocalRandom.current().nextLong(0, 100L)
+//        val jitter = ThreadLocalRandom.current().nextLong(0, 100L)
+        val jitter = ThreadLocalRandom.current().nextLong(0, baseBackoff + 1)
         val delayMs = minOf(baseBackoff + jitter, timeLeft)
 
         paymentExecutor.schedule(
