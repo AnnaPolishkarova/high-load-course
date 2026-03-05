@@ -57,10 +57,8 @@ class OrderPayer {
     }
 
     private val bucketQueue = LeakingBucketRateLimiter(
-//        rate = 2000,
         rate = 4000,
         window = Duration.ofMillis(1000),
-//        bucketSize = 8000)
         bucketSize = 4000)
 
     // Метрика для подсчета повторных вызовов
@@ -91,24 +89,17 @@ class OrderPayer {
             return null
         }
 
-        dbExecutor.execute {
-            try {
-                paymentESService.create {
-                    it.create(paymentId, orderId, amount)
-                }
-            } catch (e: Exception) {
-                logger.error("Payment $paymentId creation failed", e)
+        val createFuture = java.util.concurrent.CompletableFuture.runAsync({
+            paymentESService.create {
+                it.create(paymentId, orderId, amount)
             }
+        }, dbExecutor).exceptionally { e ->
+            logger.error("Payment $paymentId creation failed", e)
+            null
         }
 
-
         paymentExecutor.submit {
-
-//            val createdEvent = paymentESService.create {
-//                it.create(paymentId, orderId, amount)
-//            }
-//            logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
-
+            createFuture.join()
             retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
         }
 
