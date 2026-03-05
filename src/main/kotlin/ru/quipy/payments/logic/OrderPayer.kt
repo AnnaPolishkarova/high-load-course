@@ -97,7 +97,7 @@ class OrderPayer {
                     it.create(paymentId, orderId, amount)
                 }
             } catch (e: Exception) {
-                //logger.error("Payment $paymentId creation failed", e)
+                logger.error("Payment $paymentId creation failed", e)
             }
         }
 
@@ -125,7 +125,7 @@ class OrderPayer {
         val now = System.currentTimeMillis()
         val timeLeft = deadline - now
         if (timeLeft <= 0) {
-            //logger.warn("Payment $paymentId attempt #$attempt aborted: deadline exceeded")
+            logger.warn("Payment $paymentId attempt #$attempt aborted: deadline exceeded")
             return
         }
 
@@ -149,12 +149,12 @@ class OrderPayer {
                             paymentRetryOpportunityCounter.increment()
                         }
 
-//                        if (attempt <=1)     ///////////
-//                            logger.warn(
-//                                "Payment $paymentId attempt #$attempt failed: ${error.message}, " +
-//                                        "timeLeft=${deadline - System.currentTimeMillis()}ms"
-//                            )
-//                        else logger.debug("Payment $paymentId attempt #$attempt failed: ${error.message}")
+                        if (attempt <=1)     ///////////
+                            logger.warn(
+                                "Payment $paymentId attempt #$attempt failed: ${error.message}, " +
+                                        "timeLeft=${deadline - System.currentTimeMillis()}ms"
+                            )
+                        else logger.debug("Payment $paymentId attempt #$attempt failed: ${error.message}")
 
 //                        logger.warn(
 //                            "Payment $paymentId attempt #$attempt failed: ${error.message}, " +
@@ -165,7 +165,7 @@ class OrderPayer {
                     }
 
                     success == true -> {
-//                        logger.info("Payment $paymentId attempt #$attempt succeeded")
+                        logger.info("Payment $paymentId attempt #$attempt succeeded")
                     }
 
                     success == false -> {
@@ -175,7 +175,7 @@ class OrderPayer {
                             paymentRetryOpportunityCounter.increment()
                         }
 
-//                        logger.info("Payment $paymentId attempt #$attempt returned failure")
+                        logger.info("Payment $paymentId attempt #$attempt returned failure")
 
                         scheduleRetry(paymentId, amount, createdAt, deadline, attempt)
                     }
