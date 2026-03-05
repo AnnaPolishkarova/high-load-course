@@ -136,13 +136,13 @@ class PaymentExternalSystemAdapterImpl(
 //        if (!ongoingWindow.tryAcquire()) {
         if (ongoingWindow.putIntoWindow() is NonBlockingOngoingWindow.WindowResponse.Fail) {
             // убран logger.warn на каждый платёж
-            logger.debug("[$accountName] No free slot for payment $paymentId, rejecting")
+//            logger.debug("[$accountName] No free slot for payment $paymentId, rejecting")
             cf.complete(false)
             return cf
         }
 
         // убраны logger.warn / logger.info на каждый платёж в hot path
-        logger.debug("[$accountName] Submitting payment $paymentId, txId: $transactionId")
+//        logger.debug("[$accountName] Submitting payment $paymentId, txId: $transactionId")
 
         dbExecutor.execute {
             try{
@@ -154,7 +154,7 @@ class PaymentExternalSystemAdapterImpl(
                         Duration.ofMillis(now() - paymentStartedAt))
                 }
             } catch (e: Exception){
-                logger.error("[$accountName] Error logging submission for $paymentId", e)
+ //               logger.error("[$accountName] Error logging submission for $paymentId", e)
             }
         }
 
@@ -186,13 +186,13 @@ class PaymentExternalSystemAdapterImpl(
                         cf.complete(false)
                         if (e is SocketTimeoutException) {
                             paymentTimeoutCounter.increment()
-                            logger.error(
-                                "[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId",
-                                e
-                            )
+//                            logger.error(
+//                                "[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId",
+//                                e
+//                            )
                         } else {
-                            logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId",
-                                e)
+//                            logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId",
+//                                e)
                         }
                             dbExecutor.execute {
                                 try {
@@ -211,7 +211,8 @@ class PaymentExternalSystemAdapterImpl(
                     } finally {
 //                        try { ongoingWindow.release() } catch (u: Exception) {
                         try { ongoingWindow.releaseWindow() } catch (u: Exception) {
-                            logger.error("[$accountName] Error releasing ongoingWindow", u) }
+//                            logger.error("[$accountName] Error releasing ongoingWindow", u)
+                        }
                         paymentCompletedTotal.increment()
                     }
                 }
@@ -226,19 +227,19 @@ class PaymentExternalSystemAdapterImpl(
                             mapper.readValue(bodyText, ExternalSysResponse::class.java)
                         } catch (e: Exception) {
                             paymentFailureTotal.increment()
-                            logger.error(
-                                "[$accountName] [ERROR] Payment processed for txId: $transactionId, " +
-                                        "payment: $paymentId, result code: ${response.code}, reason: ${bodyText}",
-                                e
-                            )
-                            ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message ?: bodyText)
+//                            logger.error(
+//                                "[$accountName] [ERROR] Payment processed for txId: $transactionId, " +
+//                                        "payment: $paymentId, result code: ${response.code}, reason: ${bodyText}",
+//                                e
+//                            )
+                             ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message ?: bodyText)
                         }
 
 //                        logger.warn(
-                        logger.debug(
-                            "[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, " +
-                                    "succeeded: ${body.result}, message: ${body.message}"
-                        )
+//                        logger.debug(
+//                            "[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, " +
+//                                    "succeeded: ${body.result}, message: ${body.message}"
+//                        )
 
                         val result = body.result
 
@@ -258,12 +259,12 @@ class PaymentExternalSystemAdapterImpl(
                                     it.logProcessing(body.result, now(), transactionId, reason = body.message)
                                 }
                             } catch (u: Exception) {
-                                logger.error("[$accountName] Error while updating ES on response for payment $paymentId, txId: $transactionId", u)
+                                //logger.error("[$accountName] Error while updating ES on response for payment $paymentId, txId: $transactionId", u)
                             }
                         }
 
                     } catch (e: Exception) {
-                        logger.error("[$accountName] Error processing response for txId: $transactionId, payment: $paymentId", e)
+                        //logger.error("[$accountName] Error processing response for txId: $transactionId, payment: $paymentId", e)
                         paymentFailureTotal.increment()
                         cf.complete(false)
                         dbExecutor.execute {
@@ -272,10 +273,10 @@ class PaymentExternalSystemAdapterImpl(
                                     it.logProcessing(false, now(), transactionId, reason = e.message)
                                 }
                             } catch (u: Exception) {
-                                logger.error(
-                                    "[$accountName] Error in exception handler for payment $paymentId, txId: $transactionId",
-                                    u
-                                )
+//                                logger.error(
+//                                    "[$accountName] Error in exception handler for payment $paymentId, txId: $transactionId",
+//                                    u
+//                                )
                             }
                         }
                     } finally {
@@ -283,7 +284,7 @@ class PaymentExternalSystemAdapterImpl(
 //                                ongoingWindow.release()
                                 ongoingWindow.releaseWindow()
                             } catch (u: Exception) {
-                                logger.error("[$accountName] Error releasing ongoingWindow", u)
+//                                logger.error("[$accountName] Error releasing ongoingWindow", u)
                             }
                             paymentCompletedTotal.increment()
                         }
@@ -294,10 +295,10 @@ class PaymentExternalSystemAdapterImpl(
             when (e) {
                 is SocketTimeoutException -> {
                     paymentTimeoutCounter.increment()
-                    logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
+//                    logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
                 }
                 else -> {
-                    logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", e)
+//                    logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", e)
                 }
             }
             cf.complete(false)
@@ -307,12 +308,12 @@ class PaymentExternalSystemAdapterImpl(
                         it.logProcessing(false, now(), transactionId, reason = e.message)
                     }
                 } catch (u: Exception){
-                    logger.error("[$accountName] Error updating ES in outer catch for $paymentId", u)
+//                    logger.error("[$accountName] Error updating ES in outer catch for $paymentId", u)
                 }
             }
 //            try{ ongoingWindow.release() } catch (u: Exception) {
             try{ ongoingWindow.releaseWindow() } catch (u: Exception) {
-                logger.error("[$accountName] Error releasing ongoingWindow", u)
+//                logger.error("[$accountName] Error releasing ongoingWindow", u)
             }
             paymentCompletedTotal.increment()
         }
