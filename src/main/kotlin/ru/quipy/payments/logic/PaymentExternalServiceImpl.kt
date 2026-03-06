@@ -193,7 +193,11 @@ class PaymentExternalSystemAdapterImpl(
             val startedAtNs = System.nanoTime()
 
             try {
-                slidingWindowRateLimiter.tickBlocking()
+
+                if (!slidingWindowRateLimiter.tick()) {
+                    finalizePayment(false)
+                    return
+                }
 
                 val urlString = if (timeOut != Duration.ofSeconds(0)) {
                     "http://$paymentProviderHostPort/external/process?timeout=$timeOut&serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
