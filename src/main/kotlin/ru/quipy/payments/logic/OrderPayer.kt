@@ -144,7 +144,7 @@ class OrderPayer {
 
                 val remainingMs = deadline - System.currentTimeMillis()
                 if (remainingMs <= 0) {
-                    logger.warn("Payment $paymentId attempt #$attempt aborted: deadline exceeded")
+                    logger.warn("Payment $paymentId attempt #$attempt expired: too long submitPaymentRequest")
                     return@whenCompleteAsync
                 }
 
@@ -198,18 +198,13 @@ class OrderPayer {
         val timeLeft = deadline - now
         if (timeLeft <= 0) return
 
-        val baseBackoff = (100L shl (attempt - 1)).coerceAtMost(2000L)
-//        val jitter = ThreadLocalRandom.current().nextLong(0, 100L)
-        val jitter = ThreadLocalRandom.current().nextLong(0, baseBackoff + 1)
-        val delayMs = minOf(baseBackoff + jitter, timeLeft)
-
         paymentRetryScheduler.schedule(
             {
                 paymentAttemptExecutor.submit {
                     retryAsync(paymentId, amount, createdAt, deadline, attempt + 1)
                 }
             },
-            delayMs,
+            0,
             TimeUnit.MILLISECONDS
         )
     }

@@ -9,6 +9,7 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import org.slf4j.LoggerFactory
 import ru.quipy.common.utils.KeyedExecutor
+import ru.quipy.common.utils.NamedThreadFactory
 import ru.quipy.common.utils.NonBlockingOngoingWindow
 import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
@@ -26,6 +27,7 @@ import java.io.IOException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
@@ -64,7 +66,7 @@ class PaymentExternalSystemAdapterImpl(
 
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
-            .connectionPool(ConnectionPool(1, 10, TimeUnit.SECONDS))
+            .connectionPool(ConnectionPool(100, 10, TimeUnit.SECONDS))
             .readTimeout(Duration.ofSeconds(30))
             .retryOnConnectionFailure(true)
             .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
@@ -110,8 +112,11 @@ class PaymentExternalSystemAdapterImpl(
     private val latencySamplesMs: MutableList<Long> = ArrayList(100)
     private val latencyMs = AtomicLong(-1L)
 
+    private val hedgedScheduler = Executors.newScheduledThreadPool(4, NamedThreadFactory("hedged-scheduler"))
+
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): CompletableFuture<Boolean> {
         val cf = CompletableFuture<Boolean>()
+        val finalized = AtomicBoolean(false)
 
         fun recordLatencyAndMaybeInitP(durationMs: Long) {
             if (latencyMs.get() > 0) return
@@ -119,9 +124,9 @@ class PaymentExternalSystemAdapterImpl(
             var computedP: Long? = null
             synchronized(latencySamplesLock) {
                 latencySamplesMs.add(durationMs)
-                if (latencySamplesMs.size > 100) {
+                if (latencySamplesMs.size > 500) {
                     val sorted = latencySamplesMs.sorted()
-                    val pIndex = ((sorted.size * 0.6).toInt()).coerceIn(0, sorted.size - 1)
+                    val pIndex = ((sorted.size * 0.2).toInt()).coerceIn(0, sorted.size - 1)
                     computedP = sorted[pIndex]
                 }
             }
@@ -132,15 +137,20 @@ class PaymentExternalSystemAdapterImpl(
         }
 
         fun finalizePayment(result: Boolean) {
-            try {
-                cf.complete(result)
-            } finally {
+            if (finalized.compareAndSet(false, true)) {
                 try {
-                    ongoingWindow.releaseWindow()
-                } catch (u: Exception) {
-                    logger.error("[$accountName] Error releasing ongoingWindow", u)
+                    cf.complete(result)
+                } finally {
+                    try {
+                        ongoingWindow.releaseWindow()
+                    } catch (u: Exception) {
+                        logger.error("[$accountName] Error releasing ongoingWindow", u)
+                    }
+                    paymentCompletedTotal.increment()
                 }
-                paymentCompletedTotal.increment()
+            } else {
+                // Already finalized, just complete the future if not already (but it should be)
+                cf.complete(result) // will return false if already done, no harm
             }
         }
 
@@ -201,11 +211,6 @@ class PaymentExternalSystemAdapterImpl(
                 client.newCall(request).enqueue(object : Callback {
                     private fun durationMs(): Long = (System.nanoTime() - startedAtNs) / 1_000_000L
 
-                    private fun shouldRetry(durationMs: Long): Boolean {
-                        val p90 = latencyMs.get()
-                        return attempt == 1 && p90 > 0 && durationMs > p90
-                    }
-
                     override fun onFailure(call: Call, e: IOException) {
                         val d = durationMs()
                         recordLatencyAndMaybeInitP(d)
@@ -215,12 +220,6 @@ class PaymentExternalSystemAdapterImpl(
                         }
 
                         paymentFailureTotal.increment()
-
-                        val willRetry = shouldRetry(d)
-                        if (willRetry) {
-                            sendAttempt(2)
-                            return
-                        }
 
                         when (e) {
                             is SocketTimeoutException -> logger.error(
@@ -276,12 +275,6 @@ class PaymentExternalSystemAdapterImpl(
                             ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message ?: bodyText)
                         }
 
-                        val willRetry = shouldRetry(d)
-                        if (willRetry) {
-                            sendAttempt(2)
-                            return
-                        }
-
                         logger.debug(
                             "[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, " +
                                     "succeeded: ${body.result}, message: ${body.message}"
@@ -325,13 +318,6 @@ class PaymentExternalSystemAdapterImpl(
                     }
                 }
 
-                val p = latencyMs.get()
-                val willRetry = attempt == 1 && p > 0 && d > p
-                if (willRetry) {
-                    sendAttempt(2)
-                    return
-                }
-
                 paymentsEsExecutor.execute(paymentId, Runnable {
                     try {
                         paymentESService.update(paymentId) {
@@ -347,6 +333,14 @@ class PaymentExternalSystemAdapterImpl(
         }
 
         sendAttempt(1)
+
+        // Hedged request: schedule a second attempt after a short delay if the first hasn't completed yet
+        logger.info("$latencyMs");
+        hedgedScheduler.schedule({
+            if (!cf.isDone) {
+                sendAttempt(2)
+            }
+        }, latencyMs.get(), TimeUnit.MILLISECONDS)
 
         return cf
     }
