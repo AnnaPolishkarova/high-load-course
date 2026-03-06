@@ -136,7 +136,7 @@ class PaymentExternalSystemAdapterImpl(
                 latencySamplesMs.add(durationMs)
                 if (latencySamplesMs.size == 100) {
                     val sorted = latencySamplesMs.sorted()
-                    val p90Index = ((sorted.size * 0.9).toInt()).coerceIn(0, sorted.size - 1)
+                    val p90Index = ((sorted.size * 0.6).toInt()).coerceIn(0, sorted.size - 1)
                     computedP90 = sorted[p90Index]
                 }
             }
