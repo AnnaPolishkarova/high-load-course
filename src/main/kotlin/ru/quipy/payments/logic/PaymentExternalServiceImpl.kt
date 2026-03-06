@@ -35,6 +35,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 import kotlin.math.max
@@ -86,11 +87,10 @@ class PaymentExternalSystemAdapterImpl(
         window = Duration.ofSeconds(1)
     )
 
-//    private val ongoingWindow = OngoingWindow(parallelRequests)
-    private val ongoingWindow = NonBlockingOngoingWindow(parallelRequests) //////////
+    private val ongoingWindow = NonBlockingOngoingWindow(parallelRequests)
 
     // отдельный пул потоков для операций с БД
-    private val dbExecutor = Executors.newFixedThreadPool(200) ////////////////
+    private val dbExecutor = Executors.newFixedThreadPool(200)
 
     // Объявление счетчиков метрик
     private val paymentAttemptsTotal: Counter = Counter.builder("payment_attempts_total")
@@ -118,13 +118,47 @@ class PaymentExternalSystemAdapterImpl(
         .description("Total payment timeout")
         .register(meterRegistry)
 
-    override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): CompletableFuture<Boolean> {
-//        logger.warn("[$accountName] Submitting payment request for payment $paymentId")
+    private val latencySamplesLock = Any()
+    private val latencySamplesMs: MutableList<Long> = ArrayList(100)
+    private val latencySamplesCount = AtomicInteger(0)
+    private val p90LatencyMs = AtomicLong(-1L)
 
-        val transactionId = UUID.randomUUID()
+    override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): CompletableFuture<Boolean> {
         val cf = CompletableFuture<Boolean>()
 
-        paymentAttemptsTotal.increment()
+        fun recordLatencyAndMaybeInitP90(durationMs: Long) {
+            if (p90LatencyMs.get() > 0) return
+
+            val idx = latencySamplesCount.getAndIncrement()
+            if (idx >= 100) return
+
+            var computedP90: Long? = null
+            synchronized(latencySamplesLock) {
+                latencySamplesMs.add(durationMs)
+                if (latencySamplesMs.size == 100) {
+                    val sorted = latencySamplesMs.sorted()
+                    val p90Index = ((sorted.size * 0.9).toInt()).coerceIn(0, sorted.size - 1)
+                    computedP90 = sorted[p90Index]
+                }
+            }
+
+            if (computedP90 != null) {
+                p90LatencyMs.compareAndSet(-1L, computedP90!!)
+            }
+        }
+
+        fun finalizePayment(result: Boolean) {
+            try {
+                cf.complete(result)
+            } finally {
+                try {
+                    ongoingWindow.releaseWindow()
+                } catch (u: Exception) {
+                    logger.error("[$accountName] Error releasing ongoingWindow", u)
+                }
+                paymentCompletedTotal.increment()
+            }
+        }
 
 //        // Вне зависимости от исхода оплаты важно отметить что она была отправлена.
 //        // Это требуется сделать ВО ВСЕХ СЛУЧАЯХ, поскольку эта информация используется сервисом тестирования.
@@ -141,86 +175,112 @@ class PaymentExternalSystemAdapterImpl(
             return cf
         }
 
-        // убраны logger.warn / logger.info на каждый платёж в hot path
-        logger.debug("[$accountName] Submitting payment $paymentId, txId: $transactionId")
+        fun sendAttempt(attempt: Int) {
+            val transactionId = UUID.randomUUID()
 
-        dbExecutor.execute {
-            try{
-                paymentESService.update(paymentId) {
-                    it.logSubmission(
-                        success = true,
-                        transactionId,
-                        now(),
-                        Duration.ofMillis(now() - paymentStartedAt))
+            paymentAttemptsTotal.increment()
+
+            logger.debug("[$accountName] Submitting payment $paymentId, txId: $transactionId")
+
+            dbExecutor.execute {
+                try {
+                    paymentESService.update(paymentId) {
+                        it.logSubmission(
+                            success = true,
+                            transactionId,
+                            now(),
+                            Duration.ofMillis(now() - paymentStartedAt)
+                        )
+                    }
+                } catch (e: Exception) {
+                    logger.error("[$accountName] Error logging submission for $paymentId", e)
                 }
-            } catch (e: Exception){
-                logger.error("[$accountName] Error logging submission for $paymentId", e)
-            }
-        }
-
-
-//        logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
-
-        try {
-//            ongoingWindow.acquire()
-            slidingWindowRateLimiter.tickBlocking()
-
-            var urlString = if (timeOut != Duration.ofSeconds(0)) { ///?
-                "http://$paymentProviderHostPort/external/process?timeout=$timeOut&serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
-            } else {
-                "http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
             }
 
-            val request = Request.Builder().run { ///?
-                url(urlString)
-                post(emptyBody)
-            }.build()
+            val startedAtNs = System.nanoTime()
 
-            val idx = clientIndex.getAndIncrement()
-            val client = clients[(idx and Int.MAX_VALUE) % clients.size]
+            try {
+                slidingWindowRateLimiter.tickBlocking()
 
-            client.newCall(request).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    try {
-                        paymentFailureTotal.increment()
-                        cf.complete(false)
+                val urlString = if (timeOut != Duration.ofSeconds(0)) {
+                    "http://$paymentProviderHostPort/external/process?timeout=$timeOut&serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
+                } else {
+                    "http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
+                }
+
+                val request = Request.Builder().run {
+                    url(urlString)
+                    post(emptyBody)
+                }.build()
+
+                val idx = clientIndex.getAndIncrement()
+                val client = clients[(idx and Int.MAX_VALUE) % clients.size]
+
+                client.newCall(request).enqueue(object : Callback {
+                    private fun durationMs(): Long = (System.nanoTime() - startedAtNs) / 1_000_000L
+
+                    private fun shouldRetry(durationMs: Long): Boolean {
+                        val p90 = p90LatencyMs.get()
+                        return attempt == 1 && p90 > 0 && durationMs > p90
+                    }
+
+                    override fun onFailure(call: Call, e: IOException) {
+                        val d = durationMs()
+                        recordLatencyAndMaybeInitP90(d)
+
                         if (e is SocketTimeoutException) {
                             paymentTimeoutCounter.increment()
-                            logger.error(
+                        }
+
+                        paymentFailureTotal.increment()
+
+                        val willRetry = shouldRetry(d)
+                        if (willRetry) {
+                            sendAttempt(2)
+                            return
+                        }
+
+                        when (e) {
+                            is SocketTimeoutException -> logger.error(
                                 "[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId",
                                 e
                             )
-                        } else {
-                            logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId",
-                                e)
+                            else -> logger.error(
+                                "[$accountName] Payment failed for txId: $transactionId, payment: $paymentId",
+                                e
+                            )
                         }
-                            dbExecutor.execute {
-                                try {
-                                    paymentESService.update(paymentId) {
-                                        it.logProcessing(false, now(), transactionId,
-                                            reason = if (e is SocketTimeoutException) "Request timeout." else e.message)
-                                    }
-                                } catch (u: Exception) {
-                                    logger.error(
-                                        "[$accountName] Error while updating ES on timeout for payment $paymentId, " +
-                                                "txId: $transactionId",
-                                        u
+
+                        dbExecutor.execute {
+                            try {
+                                paymentESService.update(paymentId) {
+                                    it.logProcessing(
+                                        false,
+                                        now(),
+                                        transactionId,
+                                        reason = if (e is SocketTimeoutException) "Request timeout." else e.message
                                     )
                                 }
+                            } catch (u: Exception) {
+                                logger.error(
+                                    "[$accountName] Error while updating ES on failure for payment $paymentId, txId: $transactionId",
+                                    u
+                                )
                             }
-                    } finally {
-//                        try { ongoingWindow.release() } catch (u: Exception) {
-                        try { ongoingWindow.releaseWindow() } catch (u: Exception) {
-                            logger.error("[$accountName] Error releasing ongoingWindow", u) }
-                        paymentCompletedTotal.increment()
-                    }
-                }
+                        }
 
-                override fun onResponse(call: Call, response: Response) {
-                    try {
+                        finalizePayment(false)
+                    }
+
+                    override fun onResponse(call: Call, response: Response) {
+                        val d = durationMs()
+                        recordLatencyAndMaybeInitP90(d)
+
                         val bodyText = try {
                             response.body?.string()
-                        } catch (e: Exception) { null }
+                        } catch (e: Exception) {
+                            null
+                        }
 
                         val body = try {
                             mapper.readValue(bodyText, ExternalSysResponse::class.java)
@@ -234,88 +294,77 @@ class PaymentExternalSystemAdapterImpl(
                             ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message ?: bodyText)
                         }
 
-//                        logger.warn(
+                        val willRetry = shouldRetry(d)
+                        if (willRetry) {
+                            sendAttempt(2)
+                            return
+                        }
+
                         logger.debug(
                             "[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, " +
                                     "succeeded: ${body.result}, message: ${body.message}"
                         )
 
                         val result = body.result
-
                         if (result) {
                             paymentSuccessTotal.increment()
                         } else {
                             paymentFailureTotal.increment()
                         }
 
-                        cf.complete(result)
-
                         dbExecutor.execute {
-                            // Здесь мы обновляем состояние оплаты в зависимости от результата в базе данных оплат.
-                            // Это требуется сделать ВО ВСЕХ ИСХОДАХ (успешная оплата / неуспешная / ошибочная ситуация)
                             try {
                                 paymentESService.update(paymentId) {
                                     it.logProcessing(body.result, now(), transactionId, reason = body.message)
                                 }
                             } catch (u: Exception) {
-                                logger.error("[$accountName] Error while updating ES on response for payment $paymentId, txId: $transactionId", u)
-                            }
-                        }
-
-                    } catch (e: Exception) {
-                        logger.error("[$accountName] Error processing response for txId: $transactionId, payment: $paymentId", e)
-                        paymentFailureTotal.increment()
-                        cf.complete(false)
-                        dbExecutor.execute {
-                            try {
-                                paymentESService.update(paymentId) {
-                                    it.logProcessing(false, now(), transactionId, reason = e.message)
-                                }
-                            } catch (u: Exception) {
                                 logger.error(
-                                    "[$accountName] Error in exception handler for payment $paymentId, txId: $transactionId",
+                                    "[$accountName] Error while updating ES on response for payment $paymentId, txId: $transactionId",
                                     u
                                 )
                             }
                         }
-                    } finally {
-                            try {
-//                                ongoingWindow.release()
-                                ongoingWindow.releaseWindow()
-                            } catch (u: Exception) {
-                                logger.error("[$accountName] Error releasing ongoingWindow", u)
-                            }
-                            paymentCompletedTotal.increment()
+
+                        finalizePayment(result)
+                    }
+                })
+            } catch (e: Exception) {
+                val d = (System.nanoTime() - startedAtNs) / 1_000_000L
+                recordLatencyAndMaybeInitP90(d)
+
+                paymentFailureTotal.increment()
+                when (e) {
+                    is SocketTimeoutException -> {
+                        paymentTimeoutCounter.increment()
+                        logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
+                    }
+                    else -> {
+                        logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", e)
+                    }
+                }
+
+                val p90 = p90LatencyMs.get()
+                val willRetry = attempt == 1 && p90 > 0 && d > p90
+                if (willRetry) {
+                    sendAttempt(2)
+                    return
+                }
+
+                dbExecutor.execute {
+                    try {
+                        paymentESService.update(paymentId) {
+                            it.logProcessing(false, now(), transactionId, reason = e.message)
                         }
+                    } catch (u: Exception) {
+                        logger.error("[$accountName] Error updating ES in outer catch for $paymentId", u)
                     }
-            })
-        } catch (e: Exception) {
-            paymentFailureTotal.increment()
-            when (e) {
-                is SocketTimeoutException -> {
-                    paymentTimeoutCounter.increment()
-                    logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
                 }
-                else -> {
-                    logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", e)
-                }
+
+                finalizePayment(false)
             }
-            cf.complete(false)
-            dbExecutor.execute {
-                try {
-                    paymentESService.update(paymentId) {
-                        it.logProcessing(false, now(), transactionId, reason = e.message)
-                    }
-                } catch (u: Exception){
-                    logger.error("[$accountName] Error updating ES in outer catch for $paymentId", u)
-                }
-            }
-//            try{ ongoingWindow.release() } catch (u: Exception) {
-            try{ ongoingWindow.releaseWindow() } catch (u: Exception) {
-                logger.error("[$accountName] Error releasing ongoingWindow", u)
-            }
-            paymentCompletedTotal.increment()
         }
+
+        sendAttempt(1)
 
         return cf
     }
