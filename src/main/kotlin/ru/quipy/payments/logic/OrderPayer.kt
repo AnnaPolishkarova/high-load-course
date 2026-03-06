@@ -124,11 +124,19 @@ class OrderPayer {
 
         val future = paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
 
+        val timeoutMs = maxOf(1L, timeLeft)
+
         val start = System.currentTimeMillis()
 
         future
-            .orTimeout(timeLeft, TimeUnit.MILLISECONDS)
+            .orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
             .whenCompleteAsync({ success, error ->
+
+                val remainingMs = deadline - System.currentTimeMillis()
+                if (remainingMs <= 0) {
+                    logger.warn("Payment $paymentId attempt #$attempt aborted: deadline exceeded")
+                    return@whenCompleteAsync
+                }
 
                 val elapsed = System.currentTimeMillis() - start
                 requestLatency.record(elapsed, TimeUnit.MILLISECONDS)
@@ -138,21 +146,17 @@ class OrderPayer {
                         // Timeout OR exception
                         paymentRetryCounter.increment()
 
-                        if (timeLeft > 2000) {
+                        if (remainingMs > 2000) {
                             paymentRetryOpportunityCounter.increment()
                         }
 
-                        if (attempt <=1)     ///////////
+                        if (attempt <=1)
                             logger.warn(
-                                "Payment $paymentId attempt #$attempt failed: ${error.message}, " +
-                                        "timeLeft=${deadline - System.currentTimeMillis()}ms"
+                                "Payment $paymentId attempt #$attempt failed: " +
+                                        "${error.message ?: error.javaClass.simpleName}, " +
+                                        "timeLeft=${remainingMs}ms"
                             )
                         else logger.debug("Payment $paymentId attempt #$attempt failed: ${error.message}")
-
-//                        logger.warn(
-//                            "Payment $paymentId attempt #$attempt failed: ${error.message}, " +
-//                                    "timeLeft=${deadline - System.currentTimeMillis()}ms"
-//                        )
 
                         scheduleRetry(paymentId, amount, createdAt, deadline, attempt)
                     }
@@ -164,7 +168,7 @@ class OrderPayer {
                     success == false -> {
                         paymentRetryCounter.increment()
 
-                        if (timeLeft > 2000) {
+                        if (remainingMs > 2000) {
                             paymentRetryOpportunityCounter.increment()
                         }
 
