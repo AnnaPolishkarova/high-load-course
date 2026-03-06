@@ -120,13 +120,13 @@ class PaymentExternalSystemAdapterImpl(
 
         fun recordLatencyAndMaybeInitP(durationMs: Long) {
             if (latencyMs.get() > 0) return
-
+            val percentil = 0.1
             var computedP: Long? = null
             synchronized(latencySamplesLock) {
                 latencySamplesMs.add(durationMs)
                 if (latencySamplesMs.size > 500) {
                     val sorted = latencySamplesMs.sorted()
-                    val pIndex = ((sorted.size * 0.2).toInt()).coerceIn(0, sorted.size - 1)
+                    val pIndex = ((sorted.size * percentil).toInt()).coerceIn(0, sorted.size - 1)
                     computedP = sorted[pIndex]
                 }
             }
@@ -334,7 +334,8 @@ class PaymentExternalSystemAdapterImpl(
 
         sendAttempt(1)
 
-        val maxAttempts = 4
+        // Максимальное количество попыток переотправки, по умолчанию 1.
+        val maxAttempts = 10
         val baseDelay = latencyMs.get()
         for (attempt in 2..maxAttempts) {
             val delay = baseDelay * (attempt - 1)
