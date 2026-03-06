@@ -132,14 +132,14 @@ class OrderPayer {
             .orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
             .whenCompleteAsync({ success, error ->
 
+                val elapsed = System.currentTimeMillis() - start
+                requestLatency.record(elapsed, TimeUnit.MILLISECONDS)
+
                 val remainingMs = deadline - System.currentTimeMillis()
                 if (remainingMs <= 0) {
                     logger.warn("Payment $paymentId attempt #$attempt aborted: deadline exceeded")
                     return@whenCompleteAsync
                 }
-
-                val elapsed = System.currentTimeMillis() - start
-                requestLatency.record(elapsed, TimeUnit.MILLISECONDS)
 
                 when {
                     error != null -> {

@@ -4,41 +4,30 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
-import io.prometheus.metrics.core.metrics.Summary
-import io.prometheus.metrics.model.registry.PrometheusRegistry
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Autowired
 import ru.quipy.common.utils.KeyedExecutor
 import ru.quipy.common.utils.NonBlockingOngoingWindow
-import ru.quipy.common.utils.OngoingWindow
 import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
 import ru.quipy.common.utils.SlidingWindowRateLimiter
 import java.net.SocketTimeoutException
 import java.time.Duration
 import java.util.*
-import kotlin.time.DurationUnit
-import kotlin.time.measureTime
-import io.micrometer.core.instrument.Timer
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.ConnectionPool
-import okhttp3.ConnectionSpec
 import okhttp3.Dispatcher
 import okhttp3.Protocol
 import okhttp3.Response
 import java.io.IOException
-import java.security.cert.X509Certificate
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import javax.net.ssl.SSLContext
-import javax.net.ssl.X509TrustManager
 import kotlin.math.max
 
 
@@ -120,29 +109,28 @@ class PaymentExternalSystemAdapterImpl(
     private val latencySamplesLock = Any()
     private val latencySamplesMs: MutableList<Long> = ArrayList(100)
     private val latencySamplesCount = AtomicInteger(0)
-    private val p90LatencyMs = AtomicLong(-1L)
+    private val latencyMs = AtomicLong(-1L)
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): CompletableFuture<Boolean> {
         val cf = CompletableFuture<Boolean>()
 
-        fun recordLatencyAndMaybeInitP90(durationMs: Long) {
-            if (p90LatencyMs.get() > 0) return
+        fun recordLatencyAndMaybeInitP(durationMs: Long) {
+            if (latencyMs.get() > 0) return
 
             val idx = latencySamplesCount.getAndIncrement()
-            if (idx >= 100) return
 
-            var computedP90: Long? = null
+            var computedP: Long? = null
             synchronized(latencySamplesLock) {
                 latencySamplesMs.add(durationMs)
-                if (latencySamplesMs.size == 100) {
+                if (latencySamplesMs.size > 100) {
                     val sorted = latencySamplesMs.sorted()
-                    val p90Index = ((sorted.size * 0.6).toInt()).coerceIn(0, sorted.size - 1)
-                    computedP90 = sorted[p90Index]
+                    val pIndex = ((sorted.size * 0.6).toInt()).coerceIn(0, sorted.size - 1)
+                    computedP = sorted[pIndex]
                 }
             }
 
-            if (computedP90 != null) {
-                p90LatencyMs.compareAndSet(-1L, computedP90!!)
+            if (computedP != null) {
+                latencyMs.compareAndSet(-1L, computedP!!)
             }
         }
 
@@ -217,13 +205,13 @@ class PaymentExternalSystemAdapterImpl(
                     private fun durationMs(): Long = (System.nanoTime() - startedAtNs) / 1_000_000L
 
                     private fun shouldRetry(durationMs: Long): Boolean {
-                        val p90 = p90LatencyMs.get()
+                        val p90 = latencyMs.get()
                         return attempt == 1 && p90 > 0 && durationMs > p90
                     }
 
                     override fun onFailure(call: Call, e: IOException) {
                         val d = durationMs()
-                        recordLatencyAndMaybeInitP90(d)
+                        recordLatencyAndMaybeInitP(d)
 
                         if (e is SocketTimeoutException) {
                             paymentTimeoutCounter.increment()
@@ -271,7 +259,7 @@ class PaymentExternalSystemAdapterImpl(
 
                     override fun onResponse(call: Call, response: Response) {
                         val d = durationMs()
-                        recordLatencyAndMaybeInitP90(d)
+                        recordLatencyAndMaybeInitP(d)
 
                         val bodyText = try {
                             response.body?.string()
@@ -327,7 +315,7 @@ class PaymentExternalSystemAdapterImpl(
                 })
             } catch (e: Exception) {
                 val d = (System.nanoTime() - startedAtNs) / 1_000_000L
-                recordLatencyAndMaybeInitP90(d)
+                recordLatencyAndMaybeInitP(d)
 
                 paymentFailureTotal.increment()
                 when (e) {
@@ -340,8 +328,8 @@ class PaymentExternalSystemAdapterImpl(
                     }
                 }
 
-                val p90 = p90LatencyMs.get()
-                val willRetry = attempt == 1 && p90 > 0 && d > p90
+                val p = latencyMs.get()
+                val willRetry = attempt == 1 && p > 0 && d > p
                 if (willRetry) {
                     sendAttempt(2)
                     return
