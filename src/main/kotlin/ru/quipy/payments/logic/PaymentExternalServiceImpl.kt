@@ -11,6 +11,7 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
+import ru.quipy.common.utils.KeyedExecutor
 import ru.quipy.common.utils.NonBlockingOngoingWindow
 import ru.quipy.common.utils.OngoingWindow
 import ru.quipy.core.EventSourcingService
@@ -47,7 +48,8 @@ class PaymentExternalSystemAdapterImpl(
     private val paymentESService: EventSourcingService<UUID, PaymentAggregate, PaymentAggregateState>,
     private val paymentProviderHostPort: String,
     private val token: String,
-    private val meterRegistry: MeterRegistry
+    private val meterRegistry: MeterRegistry,
+    private val paymentsEsExecutor: KeyedExecutor,
 ) : PaymentExternalSystemAdapter {
 
     companion object {
@@ -88,9 +90,6 @@ class PaymentExternalSystemAdapterImpl(
     )
 
     private val ongoingWindow = NonBlockingOngoingWindow(parallelRequests)
-
-    // отдельный пул потоков для операций с БД
-    private val dbExecutor = Executors.newFixedThreadPool(200)
 
     // Объявление счетчиков метрик
     private val paymentAttemptsTotal: Counter = Counter.builder("payment_attempts_total")
@@ -160,16 +159,8 @@ class PaymentExternalSystemAdapterImpl(
             }
         }
 
-//        // Вне зависимости от исхода оплаты важно отметить что она была отправлена.
-//        // Это требуется сделать ВО ВСЕХ СЛУЧАЯХ, поскольку эта информация используется сервисом тестирования.
-//        paymentESService.update(paymentId) {
-//            it.logSubmission(success = true, transactionId, now(), Duration.ofMillis(now() - paymentStartedAt))
-//        }
-
-        // сразу отказываем если нет свободного слота — не блокируем поток ////////////////////
-//        if (!ongoingWindow.tryAcquire()) {
         if (ongoingWindow.putIntoWindow() is NonBlockingOngoingWindow.WindowResponse.Fail) {
-            // убран logger.warn на каждый платёж
+
             logger.debug("[$accountName] No free slot for payment $paymentId, rejecting")
             cf.complete(false)
             return cf
@@ -182,8 +173,10 @@ class PaymentExternalSystemAdapterImpl(
 
             logger.debug("[$accountName] Submitting payment $paymentId, txId: $transactionId")
 
-            dbExecutor.execute {
+            paymentsEsExecutor.execute(paymentId, Runnable {
                 try {
+                    // Вне зависимости от исхода оплаты важно отметить что она была отправлена.
+                    // Это требуется сделать ВО ВСЕХ СЛУЧАЯХ, поскольку эта информация используется сервисом тестирования.
                     paymentESService.update(paymentId) {
                         it.logSubmission(
                             success = true,
@@ -195,7 +188,7 @@ class PaymentExternalSystemAdapterImpl(
                 } catch (e: Exception) {
                     logger.error("[$accountName] Error logging submission for $paymentId", e)
                 }
-            }
+            })
 
             val startedAtNs = System.nanoTime()
 
@@ -251,7 +244,7 @@ class PaymentExternalSystemAdapterImpl(
                             )
                         }
 
-                        dbExecutor.execute {
+                        paymentsEsExecutor.execute(paymentId, Runnable {
                             try {
                                 paymentESService.update(paymentId) {
                                     it.logProcessing(
@@ -267,7 +260,7 @@ class PaymentExternalSystemAdapterImpl(
                                     u
                                 )
                             }
-                        }
+                        })
 
                         finalizePayment(false)
                     }
@@ -312,7 +305,7 @@ class PaymentExternalSystemAdapterImpl(
                             paymentFailureTotal.increment()
                         }
 
-                        dbExecutor.execute {
+                        paymentsEsExecutor.execute(paymentId, Runnable {
                             try {
                                 paymentESService.update(paymentId) {
                                     it.logProcessing(body.result, now(), transactionId, reason = body.message)
@@ -323,7 +316,7 @@ class PaymentExternalSystemAdapterImpl(
                                     u
                                 )
                             }
-                        }
+                        })
 
                         finalizePayment(result)
                     }
@@ -350,7 +343,7 @@ class PaymentExternalSystemAdapterImpl(
                     return
                 }
 
-                dbExecutor.execute {
+                paymentsEsExecutor.execute(paymentId, Runnable {
                     try {
                         paymentESService.update(paymentId) {
                             it.logProcessing(false, now(), transactionId, reason = e.message)
@@ -358,7 +351,7 @@ class PaymentExternalSystemAdapterImpl(
                     } catch (u: Exception) {
                         logger.error("[$accountName] Error updating ES in outer catch for $paymentId", u)
                     }
-                }
+                })
 
                 finalizePayment(false)
             }

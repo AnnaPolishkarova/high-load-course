@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service
 import ru.quipy.common.utils.CallerBlockingRejectedExecutionHandler
 import ru.quipy.common.utils.CompositeRateLimiter
 import ru.quipy.common.utils.CountingErrorMeter
+import ru.quipy.common.utils.KeyedExecutor
 import ru.quipy.common.utils.LeakingBucketRateLimiter
 import ru.quipy.common.utils.NamedThreadFactory
 import ru.quipy.common.utils.OngoingWindow
@@ -44,6 +45,9 @@ class OrderPayer {
     @Autowired
     private lateinit var meterRegistry: MeterRegistry
 
+    @Autowired
+    private lateinit var paymentsEsExecutor: KeyedExecutor
+
     private val paymentExecutor = object : ScheduledThreadPoolExecutor(
         250,  // corePoolSize
         NamedThreadFactory("payment-submission-executor")
@@ -64,8 +68,8 @@ class OrderPayer {
     // Метрика для подсчета повторных вызовов
     private val paymentRetryCounter: Counter by lazy {
         Counter.builder("payment_retry_attempts_total")
-        .description("Total payment retry attempts")
-        .register(meterRegistry)}
+            .description("Total payment retry attempts")
+            .register(meterRegistry)}
 
     // Метрика для анализа возможностей retry
     private val paymentRetryOpportunityCounter: Counter by lazy {
@@ -81,27 +85,25 @@ class OrderPayer {
             .register(meterRegistry)
     }
 
-    private val dbExecutor = Executors.newFixedThreadPool(100)
-
     fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long? {
         val createdAt = System.currentTimeMillis()
         if (!bucketQueue.tick()) {
             return null
         }
 
-        val createFuture = java.util.concurrent.CompletableFuture.runAsync({
-            paymentESService.create {
-                it.create(paymentId, orderId, amount)
-            }
-        }, dbExecutor)
-
-        createFuture.whenCompleteAsync({ _, e ->
-            if (e != null) {
+        paymentsEsExecutor.execute(paymentId, Runnable {
+            try {
+                paymentESService.create {
+                    it.create(paymentId, orderId, amount)
+                }
+            } catch (e: Exception) {
                 logger.error("Payment $paymentId creation failed", e)
-                return@whenCompleteAsync
             }
+        })
+
+        paymentExecutor.submit {
             retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
-        }, paymentExecutor)
+        }
 
         return createdAt
     }

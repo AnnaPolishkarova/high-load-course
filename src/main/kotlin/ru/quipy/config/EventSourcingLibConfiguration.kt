@@ -8,12 +8,13 @@ import org.springframework.boot.web.embedded.jetty.JettyServerCustomizer
 import org.springframework.boot.web.embedded.jetty.JettyServletWebServerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import ru.quipy.common.utils.KeyedExecutor
+import ru.quipy.common.utils.NamedThreadFactory
 import ru.quipy.core.EventSourcingServiceFactory
 import ru.quipy.payments.api.PaymentAggregate
 import ru.quipy.payments.logic.PaymentAggregateState
 import ru.quipy.streams.AggregateEventStreamManager
 import java.util.*
-
 
 /**
  * This files contains some configurations that you might want to have in your project. Some configurations are
@@ -51,6 +52,12 @@ class EventSourcingLibConfiguration {
      */
     @Bean
     fun paymentsEsService() = eventSourcingServiceFactory.create<UUID, PaymentAggregate, PaymentAggregateState>()
+
+    @Bean
+    fun paymentsEsExecutor(): KeyedExecutor = KeyedExecutor(
+        stripes = 64,
+        threadFactory = NamedThreadFactory("payments-es-executor")
+    )
 
     @PostConstruct
     fun init() {
