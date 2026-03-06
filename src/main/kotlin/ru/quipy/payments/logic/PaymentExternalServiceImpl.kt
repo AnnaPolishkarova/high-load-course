@@ -109,7 +109,7 @@ class PaymentExternalSystemAdapterImpl(
         .register(meterRegistry)
 
     private val latencySamplesLock = Any()
-    private val latencySamplesMs: MutableList<Long> = ArrayList(100)
+    private val latencySamplesMs: MutableList<Long> = ArrayList(500)
     private val latencyMs = AtomicLong(-1L)
 
     private val hedgedScheduler = Executors.newScheduledThreadPool(4, NamedThreadFactory("hedged-scheduler"))
@@ -334,13 +334,20 @@ class PaymentExternalSystemAdapterImpl(
 
         sendAttempt(1)
 
-        // Hedged request: schedule a second attempt after a short delay if the first hasn't completed yet
-        logger.info("$latencyMs");
-        hedgedScheduler.schedule({
-            if (!cf.isDone) {
-                sendAttempt(2)
+        val maxAttempts = 4
+        val baseDelay = latencyMs.get()
+        for (attempt in 2..maxAttempts) {
+            val delay = baseDelay * (attempt - 1)
+            val now = System.currentTimeMillis()
+            if (delay >= deadline - now) {
+                continue
             }
-        }, latencyMs.get(), TimeUnit.MILLISECONDS)
+            hedgedScheduler.schedule({
+                if (!cf.isDone) {
+                    sendAttempt(attempt)
+                }
+            }, delay, TimeUnit.MILLISECONDS)
+        }
 
         return cf
     }
