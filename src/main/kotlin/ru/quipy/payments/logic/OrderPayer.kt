@@ -48,14 +48,21 @@ class OrderPayer {
     @Autowired
     private lateinit var paymentsEsExecutor: KeyedExecutor
 
-    private val paymentExecutor = object : ScheduledThreadPoolExecutor(
-        250,  // corePoolSize
-        NamedThreadFactory("payment-submission-executor")
+    private val paymentAttemptExecutor = ThreadPoolExecutor(
+        250,
+        250,
+        0L,
+        TimeUnit.MILLISECONDS,
+        LinkedBlockingQueue(200_000),
+        NamedThreadFactory("payment-attempt-executor"),
+        ThreadPoolExecutor.CallerRunsPolicy(),
+    )
+
+    private val paymentRetryScheduler = object : ScheduledThreadPoolExecutor(
+        8,
+        NamedThreadFactory("payment-retry-scheduler")
     ) {
         init {
-            setMaximumPoolSize(250)
-            setKeepAliveTime(0L, TimeUnit.MILLISECONDS)
-            setRejectedExecutionHandler(CallerBlockingRejectedExecutionHandler())
             setRemoveOnCancelPolicy(true)
         }
     }
@@ -101,7 +108,7 @@ class OrderPayer {
             }
         })
 
-        paymentExecutor.submit {
+        paymentAttemptExecutor.submit {
             retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
         }
 
@@ -177,7 +184,7 @@ class OrderPayer {
                         scheduleRetry(paymentId, amount, createdAt, deadline, attempt)
                     }
                 }
-            }, paymentExecutor)
+            }, paymentAttemptExecutor)
     }
 
     private fun scheduleRetry(
@@ -196,9 +203,11 @@ class OrderPayer {
         val jitter = ThreadLocalRandom.current().nextLong(0, baseBackoff + 1)
         val delayMs = minOf(baseBackoff + jitter, timeLeft)
 
-        paymentExecutor.schedule(
+        paymentRetryScheduler.schedule(
             {
-                retryAsync(paymentId, amount, createdAt, deadline, attempt + 1)
+                paymentAttemptExecutor.submit {
+                    retryAsync(paymentId, amount, createdAt, deadline, attempt + 1)
+                }
             },
             delayMs,
             TimeUnit.MILLISECONDS

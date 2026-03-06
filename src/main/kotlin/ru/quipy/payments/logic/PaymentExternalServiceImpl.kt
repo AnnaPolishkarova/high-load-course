@@ -108,7 +108,6 @@ class PaymentExternalSystemAdapterImpl(
 
     private val latencySamplesLock = Any()
     private val latencySamplesMs: MutableList<Long> = ArrayList(100)
-    private val latencySamplesCount = AtomicInteger(0)
     private val latencyMs = AtomicLong(-1L)
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): CompletableFuture<Boolean> {
@@ -116,8 +115,6 @@ class PaymentExternalSystemAdapterImpl(
 
         fun recordLatencyAndMaybeInitP(durationMs: Long) {
             if (latencyMs.get() > 0) return
-
-            val idx = latencySamplesCount.getAndIncrement()
 
             var computedP: Long? = null
             synchronized(latencySamplesLock) {
