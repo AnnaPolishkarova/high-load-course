@@ -93,15 +93,15 @@ class OrderPayer {
             paymentESService.create {
                 it.create(paymentId, orderId, amount)
             }
-        }, dbExecutor).exceptionally { e ->
-            logger.error("Payment $paymentId creation failed", e)
-            null
-        }
+        }, dbExecutor)
 
-        paymentExecutor.submit {
-            createFuture.join()
+        createFuture.whenCompleteAsync({ _, e ->
+            if (e != null) {
+                logger.error("Payment $paymentId creation failed", e)
+                return@whenCompleteAsync
+            }
             retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
-        }
+        }, paymentExecutor)
 
         return createdAt
     }
