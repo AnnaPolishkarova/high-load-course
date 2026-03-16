@@ -23,6 +23,8 @@ import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.Protocol
 import okhttp3.Response
+import io.github.resilience4j.circuitbreaker.CircuitBreaker
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig
 import java.io.IOException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -81,6 +83,22 @@ class PaymentExternalSystemAdapterImpl(
     )
 
     private val ongoingWindow = NonBlockingOngoingWindow(parallelRequests)
+
+    private val circuitBreaker: CircuitBreaker = CircuitBreaker.of( //////////////
+        accountName,
+        CircuitBreakerConfig.custom()
+            .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
+            .slidingWindowSize(5)
+            .failureRateThreshold(50f)
+            .slowCallRateThreshold(50f)
+            .slowCallDurationThreshold(Duration.ofMillis(500))
+            .waitDurationInOpenState(Duration.ofMillis(1000))
+            .minimumNumberOfCalls(10)
+            .permittedNumberOfCallsInHalfOpenState(5)
+            .recordExceptions(IOException::class.java, SocketTimeoutException::class.java)
+            .build()
+    )
+
 
     // Объявление счетчиков метрик
     private val paymentAttemptsTotal: Counter = Counter.builder("payment_attempts_total")
@@ -162,6 +180,13 @@ class PaymentExternalSystemAdapterImpl(
         }
 
         fun sendAttempt(attempt: Int) {
+
+            if (!circuitBreaker.tryAcquirePerission()){ ////////////
+                logger.debug("[$accountName] Circuit OPEN, skipping attempt $attempt for payment $paymentId")
+                finalizePayment(false)
+                return
+            }
+
             val transactionId = UUID.randomUUID()
 
             paymentAttemptsTotal.increment()
@@ -213,6 +238,7 @@ class PaymentExternalSystemAdapterImpl(
 
                     override fun onFailure(call: Call, e: IOException) {
                         val d = durationMs()
+                        circuitBreaker.onError(d, TimeUnit.MILLISECONDS, e) ////////////////
                         recordLatencyAndMaybeInitP(d)
 
                         if (e is SocketTimeoutException) {
@@ -255,6 +281,13 @@ class PaymentExternalSystemAdapterImpl(
 
                     override fun onResponse(call: Call, response: Response) {
                         val d = durationMs()
+
+                        if (body.result) { //////////////
+                            circuitBreaker.onSuccess(d, TimeUnit.MILLISECONDS)
+                        } else {
+                            circuitBreaker.onError(d, TimeUnit.MILLISECONDS, RuntimeException("Payment return false"))
+                        }
+
                         recordLatencyAndMaybeInitP(d)
 
                         val bodyText = try {
