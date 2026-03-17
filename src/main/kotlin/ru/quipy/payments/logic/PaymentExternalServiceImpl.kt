@@ -188,6 +188,12 @@ class PaymentExternalSystemAdapterImpl(
                 return
             }
 
+            if (!slidingWindowRateLimiter.tick()) {
+                circuitBreaker.releasePermission() ///////////////
+                finalizePayment(false)
+                return
+            }
+
             val transactionId = UUID.randomUUID()
 
             paymentAttemptsTotal.increment()
@@ -214,12 +220,6 @@ class PaymentExternalSystemAdapterImpl(
             val startedAtNs = System.nanoTime()
 
             try {
-
-                if (!slidingWindowRateLimiter.tick()) {
-                    circuitBreaker.releasePermission() ///////////////
-                    finalizePayment(false)
-                    return
-                }
 
                 val urlString = if (timeOut != Duration.ofSeconds(0)) {
                     "http://$paymentProviderHostPort/external/process?timeout=$timeOut&serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
@@ -302,9 +302,7 @@ class PaymentExternalSystemAdapterImpl(
                             ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message ?: bodyText)
                         }
 
-                        if (body.result) { //////////////
-                            circuitBreaker.onSuccess(d, TimeUnit.MILLISECONDS)
-                        }
+                        circuitBreaker.onSuccess(d, TimeUnit.MILLISECONDS)
 
                         recordLatencyAndMaybeInitP(d)
 
@@ -338,7 +336,10 @@ class PaymentExternalSystemAdapterImpl(
                 })
             } catch (e: Exception) {
                 val d = (System.nanoTime() - startedAtNs) / 1_000_000L
+
                 recordLatencyAndMaybeInitP(d)
+
+                circuitBreaker.onError(d, TimeUnit.MILLISECONDS, e)
 
                 paymentFailureTotal.increment()
                 when (e) {
