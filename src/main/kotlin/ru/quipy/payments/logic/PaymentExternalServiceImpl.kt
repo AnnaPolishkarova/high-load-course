@@ -368,7 +368,7 @@ class PaymentExternalSystemAdapterImpl(
         sendAttempt(1)
 
         // Максимальное количество попыток переотправки, по умолчанию 1.
-        val maxAttempts = 10
+        val maxAttempts = 2
 //        val baseDelay = latencyMs.get()
         val baseDelay = if (latencyMs.get() > 0) latencyMs.get() else requestAverageProcessingTime.toMillis()
         for (attempt in 2..maxAttempts) {
