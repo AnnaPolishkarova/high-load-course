@@ -88,13 +88,14 @@ class PaymentExternalSystemAdapterImpl(
         accountName,
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
-            .slidingWindowSize(5)
-            .failureRateThreshold(30f)
-            .slowCallRateThreshold(30f)
-            .slowCallDurationThreshold(Duration.ofMillis(200))
-            .waitDurationInOpenState(Duration.ofMillis(500))
-            .minimumNumberOfCalls(5)
-            .permittedNumberOfCallsInHalfOpenState(3)
+            .slidingWindowSize(10)
+            .failureRateThreshold(80f)
+            .slowCallRateThreshold(90f)
+//            .slowCallDurationThreshold(Duration.ofMillis(200))
+            .slowCallDurationThreshold(Duration.ofSeconds(5))
+            .waitDurationInOpenState(Duration.ofSeconds(2))
+            .minimumNumberOfCalls(20)
+            .permittedNumberOfCallsInHalfOpenState(10)
             .recordExceptions(IOException::class.java, SocketTimeoutException::class.java)
             .build()
     )
@@ -215,6 +216,7 @@ class PaymentExternalSystemAdapterImpl(
             try {
 
                 if (!slidingWindowRateLimiter.tick()) {
+                    circuitBreaker.releasePermission() ///////////////
                     finalizePayment(false)
                     return
                 }
@@ -367,11 +369,13 @@ class PaymentExternalSystemAdapterImpl(
 
         // Максимальное количество попыток переотправки, по умолчанию 1.
         val maxAttempts = 10
-        val baseDelay = latencyMs.get()
+//        val baseDelay = latencyMs.get()
+        val baseDelay = if (latencyMs.get() > 0) latencyMs.get() else requestAverageProcessingTime.toMillis()
         for (attempt in 2..maxAttempts) {
             val delay = baseDelay * (attempt - 1)
             val now = System.currentTimeMillis()
-            if (delay >= deadline - now) {
+//            if (delay >= deadline - now) {
+            if (delay <= 0 || delay >= deadline - now) {
                 continue
             }
             hedgedScheduler.schedule({
