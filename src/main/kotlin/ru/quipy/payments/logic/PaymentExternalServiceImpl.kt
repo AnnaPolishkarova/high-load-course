@@ -181,7 +181,7 @@ class PaymentExternalSystemAdapterImpl(
 
         fun sendAttempt(attempt: Int) {
 
-            if (!circuitBreaker.tryAcquirePerission()){ ////////////
+            if (!circuitBreaker.tryAcquirePermission()){ ////////////
                 logger.debug("[$accountName] Circuit OPEN, skipping attempt $attempt for payment $paymentId")
                 finalizePayment(false)
                 return
@@ -282,14 +282,6 @@ class PaymentExternalSystemAdapterImpl(
                     override fun onResponse(call: Call, response: Response) {
                         val d = durationMs()
 
-                        if (body.result) { //////////////
-                            circuitBreaker.onSuccess(d, TimeUnit.MILLISECONDS)
-                        } else {
-                            circuitBreaker.onError(d, TimeUnit.MILLISECONDS, RuntimeException("Payment return false"))
-                        }
-
-                        recordLatencyAndMaybeInitP(d)
-
                         val bodyText = try {
                             response.body?.string()
                         } catch (e: Exception) {
@@ -307,6 +299,14 @@ class PaymentExternalSystemAdapterImpl(
                             )
                             ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message ?: bodyText)
                         }
+
+                        if (body.result) { //////////////
+                            circuitBreaker.onSuccess(d, TimeUnit.MILLISECONDS)
+                        } else {
+                            circuitBreaker.onError(d, TimeUnit.MILLISECONDS, RuntimeException("Payment return false"))
+                        }
+
+                        recordLatencyAndMaybeInitP(d)
 
                         logger.debug(
                             "[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, " +
