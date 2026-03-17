@@ -89,12 +89,12 @@ class PaymentExternalSystemAdapterImpl(
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
             .slidingWindowSize(5)
-            .failureRateThreshold(50f)
-            .slowCallRateThreshold(50f)
-            .slowCallDurationThreshold(Duration.ofMillis(500))
-            .waitDurationInOpenState(Duration.ofMillis(1000))
-            .minimumNumberOfCalls(10)
-            .permittedNumberOfCallsInHalfOpenState(5)
+            .failureRateThreshold(30f)
+            .slowCallRateThreshold(30f)
+            .slowCallDurationThreshold(Duration.ofMillis(200))
+            .waitDurationInOpenState(Duration.ofMillis(500))
+            .minimumNumberOfCalls(5)
+            .permittedNumberOfCallsInHalfOpenState(3)
             .recordExceptions(IOException::class.java, SocketTimeoutException::class.java)
             .build()
     )
@@ -302,8 +302,6 @@ class PaymentExternalSystemAdapterImpl(
 
                         if (body.result) { //////////////
                             circuitBreaker.onSuccess(d, TimeUnit.MILLISECONDS)
-                        } else {
-                            circuitBreaker.onError(d, TimeUnit.MILLISECONDS, RuntimeException("Payment return false"))
                         }
 
                         recordLatencyAndMaybeInitP(d)
