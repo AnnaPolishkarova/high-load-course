@@ -109,7 +109,9 @@ class OrderPayer {
         })
 
         paymentAttemptExecutor.submit {
-            retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
+            if (System.currentTimeMillis() < deadline){
+                retryAsync(paymentId, amount, createdAt, deadline, attempt = 1)
+            }
         }
 
         return createdAt
@@ -198,13 +200,20 @@ class OrderPayer {
         val timeLeft = deadline - now
         if (timeLeft <= 0) return
 
+        val baseDelayMs = 100L
+        val delayMs = minOf(baseDelayMs*(1L shl minOf(attempt-1, 4)),1000L)
+            .let { it/2 + (Math.random() * it/2).toLong()}
+
+        if (delayMs >= timeLeft) return
+
         paymentRetryScheduler.schedule(
             {
                 paymentAttemptExecutor.submit {
                     retryAsync(paymentId, amount, createdAt, deadline, attempt + 1)
                 }
             },
-            0,
+//            0,
+            delayMs,
             TimeUnit.MILLISECONDS
         )
     }
