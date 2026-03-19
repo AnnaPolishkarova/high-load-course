@@ -88,10 +88,10 @@ class PaymentExternalSystemAdapterImpl(
         accountName,
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
-            .slidingWindowSize(10)
+            .slidingWindowSize(5)
             .failureRateThreshold(80f)
-            .slowCallRateThreshold(90f)
-//            .slowCallDurationThreshold(Duration.ofMillis(200))
+            .slowCallRateThreshold(80f)
+            .slowCallDurationThreshold(Duration.ofMillis(200))
             .slowCallDurationThreshold(Duration.ofSeconds(5))
             .waitDurationInOpenState(Duration.ofSeconds(2))
             .minimumNumberOfCalls(20)
@@ -134,8 +134,33 @@ class PaymentExternalSystemAdapterImpl(
     private val hedgedScheduler = Executors.newScheduledThreadPool(4, NamedThreadFactory("hedged-scheduler"))
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): CompletableFuture<Boolean> {
+
+
+
         val cf = CompletableFuture<Boolean>()
         val finalized = AtomicBoolean(false)
+
+        fun finalizePayment(result: Boolean) {
+            if (finalized.compareAndSet(false, true)) {
+                try {
+                    cf.complete(result)
+                } finally {
+                    try {
+                        ongoingWindow.releaseWindow()
+                    } catch (u: Exception) {
+                        logger.error("[$accountName] Error releasing ongoingWindow", u)
+                    }
+                    paymentCompletedTotal.increment()
+                }
+            } else {
+                cf.complete(result)
+            }
+        }
+
+        if (!circuitBreaker.tryAcquirePermission()){ ////////////
+            finalizePayment(false)
+            return cf
+        }
 
         fun recordLatencyAndMaybeInitP(durationMs: Long) {
             if (latencyMs.get() > 0) return
@@ -155,24 +180,6 @@ class PaymentExternalSystemAdapterImpl(
             }
         }
 
-        fun finalizePayment(result: Boolean) {
-            if (finalized.compareAndSet(false, true)) {
-                try {
-                    cf.complete(result)
-                } finally {
-                    try {
-                        ongoingWindow.releaseWindow()
-                    } catch (u: Exception) {
-                        logger.error("[$accountName] Error releasing ongoingWindow", u)
-                    }
-                    paymentCompletedTotal.increment()
-                }
-            } else {
-                // Already finalized, just complete the future if not already (but it should be)
-                cf.complete(result) // will return false if already done, no harm
-            }
-        }
-
         if (ongoingWindow.putIntoWindow() is NonBlockingOngoingWindow.WindowResponse.Fail) {
 
             logger.debug("[$accountName] No free slot for payment $paymentId, rejecting")
@@ -182,17 +189,7 @@ class PaymentExternalSystemAdapterImpl(
 
         fun sendAttempt(attempt: Int) {
 
-            if (!circuitBreaker.tryAcquirePermission()){ ////////////
-                logger.debug("[$accountName] Circuit OPEN, skipping attempt $attempt for payment $paymentId")
-                finalizePayment(false)
-                return
-            }
-
-            if (!slidingWindowRateLimiter.tick()) {
-                circuitBreaker.releasePermission() ///////////////
-                finalizePayment(false)
-                return
-            }
+            slidingWindowRateLimiter.tickBlocking()
 
             val transactionId = UUID.randomUUID()
 
@@ -370,12 +367,10 @@ class PaymentExternalSystemAdapterImpl(
 
         // Максимальное количество попыток переотправки, по умолчанию 1.
         val maxAttempts = 1
-//        val baseDelay = latencyMs.get()
         val baseDelay = if (latencyMs.get() > 0) latencyMs.get() else requestAverageProcessingTime.toMillis()
         for (attempt in 2..maxAttempts) {
             val delay = baseDelay * (attempt - 1)
             val now = System.currentTimeMillis()
-//            if (delay >= deadline - now) {
             if (delay <= 0 || delay >= deadline - now) {
                 continue
             }
