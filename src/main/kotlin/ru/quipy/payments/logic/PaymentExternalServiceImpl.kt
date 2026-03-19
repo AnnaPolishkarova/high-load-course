@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
+import kotlin.math.min
 
 
 // Advice: always treat time as a Duration
@@ -69,7 +70,7 @@ class PaymentExternalSystemAdapterImpl(
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .connectionPool(ConnectionPool(100, 10, TimeUnit.SECONDS))
-            .readTimeout(Duration.ofSeconds(30))
+            .readTimeout(Duration.ofSeconds(10))
             .retryOnConnectionFailure(true)
             .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
             .build()
@@ -88,14 +89,13 @@ class PaymentExternalSystemAdapterImpl(
         accountName,
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
-            .slidingWindowSize(5)
+            .slidingWindowSize(10)
             .failureRateThreshold(80f)
             .slowCallRateThreshold(80f)
-            .slowCallDurationThreshold(Duration.ofMillis(200))
-            .slowCallDurationThreshold(Duration.ofSeconds(5))
-            .waitDurationInOpenState(Duration.ofSeconds(2))
+            .slowCallDurationThreshold(Duration.ofSeconds(15))
+            .waitDurationInOpenState(Duration.ofSeconds(5))
             .minimumNumberOfCalls(20)
-            .permittedNumberOfCallsInHalfOpenState(10)
+            .permittedNumberOfCallsInHalfOpenState(5)
             .recordExceptions(IOException::class.java, SocketTimeoutException::class.java)
             .build()
     )
@@ -135,11 +135,10 @@ class PaymentExternalSystemAdapterImpl(
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long): CompletableFuture<Boolean> {
 
-
-
         val cf = CompletableFuture<Boolean>()
         val finalized = AtomicBoolean(false)
 
+        // Выполняет все обязательные процедуры для завершение оплаты
         fun finalizePayment(result: Boolean) {
             if (finalized.compareAndSet(false, true)) {
                 try {
@@ -157,11 +156,7 @@ class PaymentExternalSystemAdapterImpl(
             }
         }
 
-        if (!circuitBreaker.tryAcquirePermission()){ ////////////
-            finalizePayment(false)
-            return cf
-        }
-
+        // Вычисляет задержку для hedged request
         fun recordLatencyAndMaybeInitP(durationMs: Long) {
             if (latencyMs.get() > 0) return
             val percentil = 0.1
@@ -174,21 +169,13 @@ class PaymentExternalSystemAdapterImpl(
                     computedP = sorted[pIndex]
                 }
             }
-
             if (computedP != null) {
                 latencyMs.compareAndSet(-1L, computedP!!)
             }
         }
 
-        if (ongoingWindow.putIntoWindow() is NonBlockingOngoingWindow.WindowResponse.Fail) {
-
-            logger.debug("[$accountName] No free slot for payment $paymentId, rejecting")
-            cf.complete(false)
-            return cf
-        }
-
+        // Делает попытку обращения к внешнему сервису оплаты.
         fun sendAttempt(attempt: Int) {
-
             slidingWindowRateLimiter.tickBlocking()
 
             val transactionId = UUID.randomUUID()
@@ -199,8 +186,6 @@ class PaymentExternalSystemAdapterImpl(
 
             paymentsEsExecutor.execute(paymentId, Runnable {
                 try {
-                    // Вне зависимости от исхода оплаты важно отметить что она была отправлена.
-                    // Это требуется сделать ВО ВСЕХ СЛУЧАЯХ, поскольку эта информация используется сервисом тестирования.
                     paymentESService.update(paymentId) {
                         it.logSubmission(
                             success = true,
@@ -217,7 +202,6 @@ class PaymentExternalSystemAdapterImpl(
             val startedAtNs = System.nanoTime()
 
             try {
-
                 val urlString = if (timeOut != Duration.ofSeconds(0)) {
                     "http://$paymentProviderHostPort/external/process?timeout=$timeOut&serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"
                 } else {
@@ -237,7 +221,7 @@ class PaymentExternalSystemAdapterImpl(
 
                     override fun onFailure(call: Call, e: IOException) {
                         val d = durationMs()
-                        circuitBreaker.onError(d, TimeUnit.MILLISECONDS, e) ////////////////
+                        circuitBreaker.onError(d, TimeUnit.MILLISECONDS, e)
                         recordLatencyAndMaybeInitP(d)
 
                         if (e is SocketTimeoutException) {
@@ -363,23 +347,60 @@ class PaymentExternalSystemAdapterImpl(
             }
         }
 
-        sendAttempt(1)
+        // Начинает оплату если circuitBreaker открыт, перепроверяет открытие до дедлайна
+        fun tryAcquireWithRetry() {
+            if (cf.isDone) return
 
-        // Максимальное количество попыток переотправки, по умолчанию 1.
-        val maxAttempts = 1
-        val baseDelay = if (latencyMs.get() > 0) latencyMs.get() else requestAverageProcessingTime.toMillis()
-        for (attempt in 2..maxAttempts) {
-            val delay = baseDelay * (attempt - 1)
-            val now = System.currentTimeMillis()
-            if (delay <= 0 || delay >= deadline - now) {
-                continue
-            }
-            hedgedScheduler.schedule({
-                if (!cf.isDone) {
-                    sendAttempt(attempt)
+            if (circuitBreaker.tryAcquirePermission()) {
+
+                if (cf.isDone) return
+
+                val now = System.currentTimeMillis()
+                if (now >= deadline) {
+                    finalizePayment(false)
+                    return
                 }
-            }, delay, TimeUnit.MILLISECONDS)
+
+                when (val windowResult = ongoingWindow.putIntoWindow()) {
+                    is NonBlockingOngoingWindow.WindowResponse.Success -> {
+                        sendAttempt(1)
+
+                        // Максимальное количество попыток переотправки, по умолчанию 1.
+                        val maxAttempts = 1
+                        val baseDelay = if (latencyMs.get() > 0) latencyMs.get() else requestAverageProcessingTime.toMillis()
+                        for (attempt in 2..maxAttempts) {
+                            val delay = baseDelay * (attempt - 1)
+                            val now2 = System.currentTimeMillis()
+                            if (delay <= 0 || delay >= deadline - now2) {
+                                continue
+                            }
+                            hedgedScheduler.schedule({
+                                if (!cf.isDone) {
+                                    sendAttempt(attempt)
+                                }
+                            }, delay, TimeUnit.MILLISECONDS)
+                        }
+                    }
+                    is NonBlockingOngoingWindow.WindowResponse.Fail -> {
+                        logger.debug("[$accountName] No free slot for payment $paymentId, rejecting")
+                        finalizePayment(false)
+                    }
+                }
+            } else {
+                val now = System.currentTimeMillis()
+                val remaining = deadline - now + 100
+                if (remaining <= 0) {
+                    finalizePayment(false)
+                } else {
+                    val delay = min(300, remaining)
+                    hedgedScheduler.schedule({
+                        tryAcquireWithRetry()
+                    }, delay, TimeUnit.MILLISECONDS)
+                }
+            }
         }
+
+        tryAcquireWithRetry()
 
         return cf
     }
